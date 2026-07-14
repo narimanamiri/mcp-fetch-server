@@ -7,8 +7,7 @@ from urllib.parse import unquote
 
 from mcp.server.fastmcp import FastMCP
 
-from mcp_fetch_server import __version__
-from mcp_fetch_server.config import settings
+from mcp_fetch_server.config_snapshot import public_settings
 from mcp_fetch_server.history import history
 
 
@@ -21,20 +20,7 @@ def register_resources(mcp: FastMCP) -> None:
         mime_type="application/json",
     )
     def read_settings() -> str:
-        redacted = {
-            "version": __version__,
-            "user_agent": settings.user_agent,
-            "allowed_domains": sorted(settings.allowed_domain_set) or "any",
-            "max_response_bytes": settings.max_response_bytes,
-            "request_timeout_seconds": settings.request_timeout_seconds,
-            "max_redirects": settings.max_redirects,
-            "default_max_length": settings.default_max_length,
-            "max_batch_urls": settings.max_batch_urls,
-            "search_max_results": settings.search_max_results,
-            "local_files_root": settings.local_files_root or None,
-            "auth_enabled": bool(settings.mcp_auth_token),
-        }
-        return json.dumps(redacted, indent=2)
+        return json.dumps(public_settings(), indent=2)
 
     @mcp.resource(
         "history://recent",

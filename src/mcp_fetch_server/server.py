@@ -15,6 +15,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from mcp_fetch_server import __version__
+from mcp_fetch_server.admin import AdminPanel, start_admin_background
 from mcp_fetch_server.auth import StaticTokenVerifier
 from mcp_fetch_server.completions import register_completions
 from mcp_fetch_server.config import settings
@@ -45,6 +46,7 @@ def create_mcp_server(
     host: str = "127.0.0.1",
     port: int = 8000,
     require_auth: bool = False,
+    transport: Literal["stdio", "streamable-http"] = "stdio",
 ) -> FastMCP:
     _configure_logging()
 
@@ -141,6 +143,9 @@ def create_mcp_server(
     register_prompts(mcp)
     register_completions(mcp)
 
+    if settings.admin_enabled and transport == "streamable-http":
+        AdminPanel(mcp=mcp, transport=transport).register_routes(mcp)
+
     return mcp
 
 
@@ -151,7 +156,12 @@ def run_server(
     port: int = 8000,
 ) -> None:
     require_auth = transport == "streamable-http"
-    mcp = create_mcp_server(host=host, port=port, require_auth=require_auth)
+    mcp = create_mcp_server(
+        host=host,
+        port=port,
+        require_auth=require_auth,
+        transport=transport,
+    )
 
     if transport == "streamable-http":
         import anyio
@@ -170,10 +180,20 @@ def run_server(
                 log_level=settings.log_level.lower(),
             )
             server = uvicorn.Server(config)
+            if settings.admin_enabled:
+                logger.info("Admin GUI at http://%s:%s/admin", host, port)
             logger.info("Starting streamable-http server at http://%s:%s/mcp", host, port)
             await server.serve()
 
         anyio.run(_serve)
         return
+
+    if settings.admin_enabled:
+        start_admin_background(mcp=mcp, transport=transport)
+        logger.info(
+            "Admin GUI at http://%s:%s/admin",
+            settings.admin_host,
+            settings.admin_port,
+        )
 
     mcp.run(transport="stdio")

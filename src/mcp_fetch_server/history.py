@@ -65,6 +65,18 @@ class FetchHistory:
     def cached_urls(self) -> list[str]:
         return list(reversed(list(self._cache.keys())))
 
+    @property
+    def entry_count(self) -> int:
+        return len(self._entries)
+
+    @property
+    def cache_count(self) -> int:
+        return len(self._cache)
+
+    @property
+    def cache_bytes_used(self) -> int:
+        return self._cache_bytes
+
     def clear(self) -> None:
         self._entries.clear()
         self._cache.clear()

@@ -304,6 +304,29 @@ If your client has a resources browser, you can inspect:
 | `history://recent` | URLs fetched recently in this session |
 | `fetch-cache://<url>` | Re-read a previously fetched page without re-fetching it |
 
+### Management web GUI
+
+Open the built-in dashboard in your browser to monitor the server without going through
+Cursor:
+
+| How you run the server | Dashboard URL |
+|------------------------|---------------|
+| **stdio** (normal Cursor setup) | `http://127.0.0.1:8001/admin` |
+| **streamable-http** | `http://127.0.0.1:8000/admin` (same port as MCP) |
+
+The dashboard shows:
+
+- Server uptime and version
+- Registered MCP tools
+- Redacted configuration
+- Recent fetch history (status, errors, cache status)
+- Cached page preview (click **view** on a cached row)
+- **Clear history & cache** button
+
+It refreshes automatically every 30 seconds. If `MCP_AUTH_TOKEN` is set, paste the token
+into the auth bar at the top (saved in your browser session only). Disable the GUI entirely
+with `FETCH_ADMIN_ENABLED=false`.
+
 ---
 
 ## 6. Remote / HTTP mode
@@ -391,6 +414,11 @@ FETCH_SEARCH_MAX_RESULTS=5
 # Optional SearXNG fallback for web_search (used only if DuckDuckGo fails).
 # Leave empty to disable it entirely.
 FETCH_SEARXNG_URL=http://localhost:8080
+
+# Management web GUI (enabled by default)
+FETCH_ADMIN_ENABLED=true
+FETCH_ADMIN_HOST=127.0.0.1
+FETCH_ADMIN_PORT=8001
 
 # Required for HTTP mode
 MCP_AUTH_TOKEN=your-secret-token

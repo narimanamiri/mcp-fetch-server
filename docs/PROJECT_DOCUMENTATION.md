@@ -46,13 +46,15 @@ mcp-fetch-server/
 │   ├── search.py              # DuckDuckGo web search (primary) + SearXNG (fallback)
 │   ├── links.py               # Structured link/image extraction
 │   ├── files.py               # Sandboxed local file read/write/list
+│   ├── admin.py               # Management web GUI (/admin dashboard + API)
+│   ├── config_snapshot.py     # Redacted settings for admin UI and resources
 │   ├── fetcher.py             # HTTP client and redirect handling
 │   ├── security.py           # SSRF, DNS, robots.txt, allowlist
 │   ├── converters.py         # HTML sanitization and markdown conversion
 │   ├── config.py             # Environment-based settings
 │   ├── auth.py               # Static Bearer token verifier
 │   └── middleware.py         # HTTP rate limiting
-├── tests/                    # pytest test suite (77 tests)
+├── tests/                    # pytest test suite (84 tests)
 ├── docs/                     # Documentation
 ├── scripts/
 │   └── build_exe.ps1         # PyInstaller build script
@@ -172,6 +174,9 @@ Loads settings from environment variables via `pydantic-settings`.
 | `FETCH_SEARCH_TIMEOUT_SECONDS` | `15` | Timeout for the DuckDuckGo request |
 | `FETCH_SEARXNG_URL` | `http://localhost:8080` | Base URL of a SearXNG instance used as `web_search` fallback; empty disables it |
 | `FETCH_SEARXNG_TIMEOUT_SECONDS` | `10` | Timeout for the SearXNG fallback request |
+| `FETCH_ADMIN_ENABLED` | `true` | Enable the management web GUI |
+| `FETCH_ADMIN_HOST` | `127.0.0.1` | Bind address for the GUI in stdio mode |
+| `FETCH_ADMIN_PORT` | `8001` | Port for the GUI in stdio mode (`/admin` on MCP port in HTTP mode) |
 | `FETCH_LOCAL_FILES_ROOT` | *(empty = disabled)* | Sandbox root for `read_file`/`write_file`/`list_dir` |
 | `FETCH_MAX_FILE_READ_BYTES` | `2000000` | Max file size `read_file` will return |
 | `FETCH_MAX_FILE_WRITE_BYTES` | `2000000` | Max content size `write_file` will accept |
@@ -263,6 +268,23 @@ Blocked IP categories: loopback, private, link-local, reserved, multicast, and c
   (`summarize_url`), and roots (local file tools)
 - **`resolve_allowed_roots()`** — Combines `FETCH_LOCAL_FILES_ROOT` with any directories the
   connected client exposes via the MCP *roots* capability
+
+### `admin.py`
+
+- **`AdminPanel`** — Management web GUI served at `/admin` with a JSON API under
+  `/admin/api/*`. Shows uptime, tools, redacted config, fetch history, cache preview, and
+  supports clearing history/cache
+- **stdio mode** — runs as a background HTTP server on `FETCH_ADMIN_HOST:FETCH_ADMIN_PORT`
+  (default `127.0.0.1:8001`) while MCP continues over stdio
+- **streamable-http mode** — mounted on the same uvicorn app at `/admin`
+- **Auth** — when `MCP_AUTH_TOKEN` is set, admin API routes require the same Bearer token;
+  `/admin` HTML and `/health` stay reachable without auth (token entered in-browser for API
+  calls). `/admin` routes are exempt from rate limiting
+
+### `config_snapshot.py`
+
+- **`public_settings()`** — Shared redacted configuration dict used by both
+  `config://settings` and the admin dashboard
 
 ### `resources.py`
 
@@ -580,7 +602,7 @@ cloudflared tunnel --url http://127.0.0.1:8000
 ## 10. Testing
 
 ```powershell
-uv run pytest          # 77 tests
+uv run pytest          # 84 tests
 uv run ruff check .    # Lint
 ```
 
@@ -597,6 +619,7 @@ Test coverage areas:
 - Rate limiting (429)
 - Health endpoint
 - Fetch history/cache recording and eviction (`test_history.py`)
+- Admin dashboard HTML, API, auth, and history/cache management (`test_admin.py`)
 - Web search parsing, redirect unwrapping, SearXNG JSON parsing, and DuckDuckGo→SearXNG
   fallback behavior (`test_search.py`)
 - Link/image extraction (`test_links.py`)

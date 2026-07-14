@@ -24,6 +24,7 @@ An all-in-one Python MCP server for web research: fetch pages, search the web, b
 - **Elicitation**: `write_file` confirms before overwriting an existing file
 - **Roots**: local file tools honor client-exposed directories in addition to `FETCH_LOCAL_FILES_ROOT`
 - **Progress notifications**: `batch_fetch` and `summarize_url` report progress as they run
+- **Management GUI**: web dashboard at `/admin` for status, config, history, cache, and tools
 
 ### Security
 - SSRF protection with resolve-then-check and redirect re-validation
@@ -72,6 +73,22 @@ Minimal `.cursor/mcp.json` using the executable:
 }
 ```
 
+## Management GUI
+
+A built-in web dashboard lets you monitor and manage the server without using Cursor:
+
+| Mode | URL |
+|------|-----|
+| **stdio** (Cursor default) | `http://127.0.0.1:8001/admin` |
+| **streamable-http** | `http://127.0.0.1:8000/admin` (same port as MCP) |
+
+The dashboard shows uptime, registered tools, redacted configuration, recent fetch
+history, cached page previews, and a button to clear history/cache. It auto-refreshes
+every 30 seconds.
+
+If `MCP_AUTH_TOKEN` is set, enter it in the dashboard's auth bar (stored in your
+browser session only). Disable the GUI with `FETCH_ADMIN_ENABLED=false`.
+
 ## Optional: SearXNG search fallback
 
 `web_search` uses DuckDuckGo by default. Since that's an unofficial HTML scrape, you can
@@ -103,11 +120,12 @@ $env:MCP_AUTH_TOKEN = "your-long-random-token"
 mcp-fetch-server/
 ├── dist/mcp-fetch-server.exe   # Windows executable
 ├── src/mcp_fetch_server/       # Source code (tools, resources, prompts, security, ...)
-├── tests/                      # 77 pytest tests
+├── tests/                      # 84 pytest tests
 ├── docs/                       # User manual + technical docs
 ├── scripts/build_exe.ps1       # Build script
 ├── docker-compose.yml          # Optional local SearXNG instance (web_search fallback)
 ├── searxng/settings.yml        # SearXNG config (JSON API enabled)
+├── src/mcp_fetch_server/admin.py  # Management web GUI
 └── .cursor/mcp.json            # Cursor config
 ```
 

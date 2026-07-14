@@ -37,6 +37,11 @@ class RateLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
+        path = scope.get("path", "")
+        if path == "/health" or path.startswith("/admin"):
+            await self.app(scope, receive, send)
+            return
+
         headers: dict[str, str] = {
             key.decode("latin-1").lower(): value.decode("latin-1")
             for key, value in scope.get("headers", [])

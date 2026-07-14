@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     max_file_read_bytes: int = Field(default=2_000_000, alias="FETCH_MAX_FILE_READ_BYTES")
     max_file_write_bytes: int = Field(default=2_000_000, alias="FETCH_MAX_FILE_WRITE_BYTES")
 
+    # Management web GUI (dashboard at /admin). In stdio mode it runs as a
+    # background HTTP server on admin_host:admin_port; in streamable-http mode
+    # it is served on the same port under /admin.
+    admin_enabled: bool = Field(default=True, alias="FETCH_ADMIN_ENABLED")
+    admin_host: str = Field(default="127.0.0.1", alias="FETCH_ADMIN_HOST")
+    admin_port: int = Field(default=8001, alias="FETCH_ADMIN_PORT")
+
     @property
     def allowed_domain_set(self) -> set[str]:
         if not self.allowed_domains.strip():

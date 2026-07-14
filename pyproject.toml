@@ -36,6 +36,9 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "admin_auth: admin tests that require MCP_AUTH_TOKEN to be set",
+]
 
 [tool.ruff]
 line-length = 100
@@ -43,3 +46,6 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/mcp_fetch_server/admin.py" = ["E501"]
