@@ -1,0 +1,34 @@
+# Optional local SearXNG instance used as a fallback search backend for the
+# web_search tool (see searxng/settings.yml and README.md). Start it with:
+#
+#   docker compose up -d
+#
+# Then set FETCH_SEARXNG_URL=http://localhost:8080 in your .env (already the
+# default). The MCP server itself does NOT need to run inside this compose
+# file - keep running it locally (`mcp-fetch-server.exe` / `uv run`) or add a
+# service for it here if you prefer everything containerized.
+services:
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: mcp-fetch-searxng
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+      - UWSGI_WORKERS=2
+      - UWSGI_THREADS=4
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "1"

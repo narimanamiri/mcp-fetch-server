@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "web-fetch": {
+      "command": "E:/my python projects/MCP/mcp-fetch-server/dist/mcp-fetch-server.exe",
+      "args": ["--transport", "stdio"],
+      "env": {
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    "web-fetch-dev": {
+      "command": "uv",
+      "args": ["run", "mcp-fetch-server", "--transport", "stdio"],
+      "env": {
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    "web-fetch-remote": {
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:MCP_AUTH_TOKEN}"
+      }
+    }
+  }
+}

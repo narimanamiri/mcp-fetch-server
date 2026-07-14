@@ -1,0 +1,101 @@
+# -*- mode: python ; coding: utf-8 -*-
+"""PyInstaller spec for mcp-fetch-server Windows executable."""
+
+import sys
+from pathlib import Path
+
+block_cipher = None
+project_root = Path(SPECPATH)
+
+hiddenimports = [
+    "mcp",
+    "mcp.server",
+    "mcp.server.fastmcp",
+    "mcp.server.auth",
+    "mcp.server.auth.middleware",
+    "mcp.server.auth.middleware.auth_context",
+    "mcp.server.auth.middleware.bearer_auth",
+    "mcp.server.streamable_http_manager",
+    "mcp.types",
+    "uvicorn",
+    "uvicorn.logging",
+    "uvicorn.loops",
+    "uvicorn.loops.auto",
+    "uvicorn.protocols",
+    "uvicorn.protocols.http",
+    "uvicorn.protocols.http.auto",
+    "uvicorn.protocols.websockets",
+    "uvicorn.protocols.websockets.auto",
+    "uvicorn.lifespan",
+    "uvicorn.lifespan.on",
+    "starlette",
+    "starlette.routing",
+    "starlette.middleware",
+    "starlette.middleware.authentication",
+    "httpx",
+    "httpcore",
+    "anyio",
+    "anyio._backends",
+    "anyio._backends._asyncio",
+    "pydantic",
+    "pydantic_settings",
+    "readability",
+    "markdownify",
+    "protego",
+    "lxml",
+    "lxml.etree",
+    "lxml_html_clean",
+    "bs4",
+    "certifi",
+    "jsonschema",
+    "sse_starlette",
+    "mcp_fetch_server",
+    "mcp_fetch_server.server",
+    "mcp_fetch_server.fetcher",
+    "mcp_fetch_server.security",
+    "mcp_fetch_server.converters",
+    "mcp_fetch_server.config",
+    "mcp_fetch_server.auth",
+    "mcp_fetch_server.middleware",
+]
+
+a = Analysis(
+    [str(project_root / "src" / "mcp_fetch_server" / "__main__.py")],
+    pathex=[str(project_root / "src")],
+    binaries=[],
+    datas=[],
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name="mcp-fetch-server",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=None,
+)

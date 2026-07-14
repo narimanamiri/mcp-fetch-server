@@ -1,0 +1,25 @@
+# Minimal SearXNG configuration for the mcp-fetch-server's web_search fallback.
+#
+# This instance is meant to run locally (docker compose up -d) purely as a
+# private JSON search API for the MCP server - it is not meant to be exposed
+# publicly. `use_default_settings: true` loads all of SearXNG's normal
+# engines/UI and we only override what's needed to (a) enable the JSON output
+# format and (b) disable the request limiter, which otherwise blocks
+# same-origin API calls without a browser-like session/cookie.
+use_default_settings: true
+
+general:
+  instance_name: "mcp-fetch-server-searxng"
+
+server:
+  # Change this if you ever expose the instance beyond localhost.
+  secret_key: "change-this-to-a-random-secret-value"
+  limiter: false
+  image_proxy: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  formats:
+    - html
+    - json
