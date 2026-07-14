@@ -1,25 +1,64 @@
-# Optional local SearXNG instance used as a fallback search backend for the
-# web_search tool (see searxng/settings.yml and README.md). Start it with:
+# Full stack: MCP fetch server + SearXNG + management GUI
+# Compatible with Docker Compose v1 (docker-compose) and v2 (docker compose).
 #
-#   docker compose up -d
+# Quick start:
+#   Linux/macOS: cp .env.docker.example .env && ./scripts/docker-up.sh
+#   Windows:     copy .env.docker.example .env && .\scripts\docker-up.ps1
+#   Any:         docker compose up -d --build
 #
-# Then set FETCH_SEARXNG_URL=http://localhost:8080 in your .env (already the
-# default). The MCP server itself does NOT need to run inside this compose
-# file - keep running it locally (`mcp-fetch-server.exe` / `uv run`) or add a
-# service for it here if you prefer everything containerized.
+# Endpoints (default ports):
+#   MCP protocol : http://localhost:8000/mcp
+#   Admin GUI    : http://localhost:8000/admin
+#   Health       : http://localhost:8000/health
+#   SearXNG UI   : http://localhost:8080  (web_search fallback backend)
+
+version: "3.8"
+
 services:
+  mcp-fetch-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mcp-fetch-server:latest
+    container_name: mcp-fetch-server
+    restart: unless-stopped
+    ports:
+      - "${MCP_HTTP_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN}
+      FETCH_SEARXNG_URL: http://searxng:8080
+      FETCH_LOCAL_FILES_ROOT: /workspace
+      FETCH_ADMIN_ENABLED: ${FETCH_ADMIN_ENABLED:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./workspace:/workspace
+    depends_on:
+      - searxng
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
   searxng:
     image: docker.io/searxng/searxng:latest
     container_name: mcp-fetch-searxng
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${SEARXNG_HTTP_PORT:-8080}:8080"
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     environment:
-      - SEARXNG_BASE_URL=http://localhost:8080/
-      - UWSGI_WORKERS=2
-      - UWSGI_THREADS=4
+      SEARXNG_BASE_URL: http://localhost:${SEARXNG_HTTP_PORT:-8080}/
+      UWSGI_WORKERS: ${SEARXNG_UWSGI_WORKERS:-2}
+      UWSGI_THREADS: ${SEARXNG_UWSGI_THREADS:-4}
     cap_drop:
       - ALL
     cap_add:
@@ -27,6 +66,11 @@ services:
       - SETGID
       - SETUID
       - DAC_OVERRIDE
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     logging:
       driver: json-file
       options:

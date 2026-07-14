@@ -12,6 +12,10 @@ wheels/
 # Secrets
 .env
 
+# Docker workspace mount (keep directory, ignore user files)
+workspace/*
+!workspace/.gitkeep
+
 # Build artifacts
 dist/
 build/

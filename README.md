@@ -3,8 +3,11 @@
 An all-in-one Python MCP server for web research: fetch pages, search the web, batch-fetch, extract links, summarize via client-side sampling, and (optionally) read/write local files — all for LLM agents like Cursor. Supports local **stdio** and **Streamable HTTP** for remote access, and exercises essentially every MCP protocol capability (Tools, Resources, Prompts, Completions, Sampling, Elicitation, Roots, Progress, Logging).
 
 **Documentation:**
-- [User Manual](docs/USER_MANUAL.md) — installation, Cursor setup, troubleshooting
-- [Project Documentation](docs/PROJECT_DOCUMENTATION.md) — architecture, modules, security, API
+
+| Document | What's inside |
+|----------|---------------|
+| [User Manual](docs/USER_MANUAL.md) | Full end-user guide: install (Docker/Linux/Windows), Cursor setup, all tools, admin GUI, config, troubleshooting |
+| [Project Documentation](docs/PROJECT_DOCUMENTATION.md) | Full technical reference: architecture, modules, MCP APIs, admin API, security, Docker stack, testing |
 
 ## Features
 
@@ -37,7 +40,51 @@ An all-in-one Python MCP server for web research: fetch pages, search the web, b
 
 ## Quick Start
 
-### Option A: Windows executable (recommended)
+### Option A: Docker — full stack (recommended for server deployment)
+
+Runs the MCP server, admin GUI, and SearXNG together.
+
+**Linux / macOS:**
+
+```bash
+cd mcp-fetch-server
+cp .env.docker.example .env          # edit MCP_AUTH_TOKEN
+chmod +x scripts/docker-up.sh
+./scripts/docker-up.sh
+# or: docker compose up -d --build
+```
+
+**Windows (PowerShell):**
+
+```powershell
+cd "E:\my python projects\MCP\mcp-fetch-server"
+copy .env.docker.example .env
+.\scripts\docker-up.ps1
+```
+
+| Service | URL |
+|---------|-----|
+| MCP protocol | `http://127.0.0.1:8000/mcp` |
+| Admin GUI | `http://127.0.0.1:8000/admin` |
+| Health | `http://127.0.0.1:8000/health` |
+| SearXNG (search fallback) | `http://127.0.0.1:8080` |
+
+Connect Cursor over HTTP (Bearer token required):
+
+```json
+{
+  "mcpServers": {
+    "web-fetch": {
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": { "Authorization": "Bearer your-token-from-env" }
+    }
+  }
+}
+```
+
+Local files for `read_file`/`write_file` map to the `./workspace` folder on your host.
+
+### Option B: Windows executable (local / Cursor stdio)
 
 ```powershell
 cd "E:\my python projects\MCP\mcp-fetch-server"
@@ -46,7 +93,7 @@ cd "E:\my python projects\MCP\mcp-fetch-server"
 
 Build the exe yourself: `.\scripts\build_exe.ps1` → outputs `dist\mcp-fetch-server.exe`
 
-### Option B: Python + uv (development)
+### Option C: Python + uv (development)
 
 ```powershell
 cd "E:\my python projects\MCP\mcp-fetch-server"
@@ -91,20 +138,19 @@ browser session only). Disable the GUI with `FETCH_ADMIN_ENABLED=false`.
 
 ## Optional: SearXNG search fallback
 
-`web_search` uses DuckDuckGo by default. Since that's an unofficial HTML scrape, you can
-optionally run a local [SearXNG](https://docs.searxng.org/) instance as a fallback that
-`web_search` automatically uses if DuckDuckGo's scrape ever fails:
+`web_search` uses DuckDuckGo by default and falls back to SearXNG when that scrape fails.
+When you use **Docker** (`docker compose up`), SearXNG is started automatically and the MCP
+container is preconfigured to reach it at `http://searxng:8080`.
+
+For **local** (non-Docker) use, you can still run only SearXNG:
 
 ```powershell
-docker compose up -d           # starts SearXNG at http://localhost:8080 (JSON API enabled)
+docker compose up -d searxng
 ```
 
-No further configuration is needed — `FETCH_SEARXNG_URL` already defaults to
-`http://localhost:8080` in `.env.example`/`.env`. Set it to an empty string to disable the
-fallback, or point it at any other SearXNG instance you run. See `docker-compose.yml` and
-`searxng/settings.yml`.
+Set `FETCH_SEARXNG_URL=http://localhost:8080` in `.env`. See `searxng/settings.yml`.
 
-## Remote HTTP Mode
+## Remote HTTP Mode (without full Docker stack)
 
 ```powershell
 $env:MCP_AUTH_TOKEN = "your-long-random-token"
@@ -122,8 +168,12 @@ mcp-fetch-server/
 ├── src/mcp_fetch_server/       # Source code (tools, resources, prompts, security, ...)
 ├── tests/                      # 84 pytest tests
 ├── docs/                       # User manual + technical docs
-├── scripts/build_exe.ps1       # Build script
-├── docker-compose.yml          # Optional local SearXNG instance (web_search fallback)
+├── scripts/docker-up.sh        # Linux/macOS stack startup
+├── scripts/docker-up.ps1       # Windows stack startup
+├── docker-compose.yml          # Full stack: MCP server + SearXNG
+├── .env.docker.example         # Environment template for Docker Compose
+├── Dockerfile                  # MCP server image
+├── workspace/                  # Host folder mounted for local file tools (Docker)
 ├── searxng/settings.yml        # SearXNG config (JSON API enabled)
 ├── src/mcp_fetch_server/admin.py  # Management web GUI
 └── .cursor/mcp.json            # Cursor config
@@ -131,10 +181,18 @@ mcp-fetch-server/
 
 ## Development
 
-```powershell
+```bash
 uv run pytest
 uv run ruff check .
+./scripts/docker-up.sh          # Linux / macOS
+docker compose down
+```
+
+Windows only:
+
+```powershell
 .\scripts\build_exe.ps1
+.\scripts\docker-up.ps1
 ```
 
 ## License

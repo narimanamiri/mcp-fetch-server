@@ -1,0 +1,36 @@
+# Git and IDE
+.git
+.gitignore
+.cursor
+
+# Python
+.venv
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Build / distribution (not needed in image)
+build/
+dist/
+*.exe
+mcp_fetch_server.spec
+scripts/build_exe.ps1
+
+# Tests and local dev artifacts
+tests/
+htmlcov/
+.coverage
+
+# Secrets — injected at runtime via compose env_file / environment
+.env
+
+# Docs and misc
+docs/
+*.md
+!README.md
+
+# Docker runtime data (mounted as volumes)
+workspace/
