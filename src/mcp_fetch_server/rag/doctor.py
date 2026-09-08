@@ -120,7 +120,14 @@ async def check_llm(report: Report, *, llm: LocalLLM | None = None) -> None:
 
 async def check_qdrant(report: Report) -> None:
     """Probe Qdrant over plain HTTP so the optional client is not required."""
-    url = settings.qdrant_url.rstrip("/")
+    url = settings.qdrant_url.strip().rstrip("/")
+
+    if not url:
+        # No server configured: Qdrant runs embedded on local disk, which is
+        # a supported setup rather than a misconfiguration.
+        report.add("qdrant", "ok", f"embedded, at {settings.corpus_dir / 'qdrant'}")
+        return
+
     headers = {"api-key": settings.qdrant_api_key} if settings.qdrant_api_key else {}
     try:
         async with httpx.AsyncClient(timeout=5.0, headers=headers) as client:
@@ -130,7 +137,8 @@ async def check_qdrant(report: Report) -> None:
             "qdrant",
             "fail",
             f"unreachable at {url} ({exc})",
-            "Start it with `docker compose up -d qdrant`.",
+            "Start it with `docker compose up -d qdrant`, or set FETCH_QDRANT_URL "
+            "empty to run Qdrant embedded on local disk instead.",
         )
         return
 

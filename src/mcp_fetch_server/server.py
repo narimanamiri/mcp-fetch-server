@@ -33,6 +33,25 @@ from mcp_fetch_server.tools_extra import register_extra_tools
 logger = logging.getLogger(__name__)
 
 
+def register_corpus_tools(mcp: FastMCP) -> None:
+    """Register the offline-corpus tools, if the optional extra is installed.
+
+    The corpus is opt-in: without the ``rag`` extra this is a plain web fetch
+    server, and a missing qdrant-client must degrade to "no corpus tools"
+    rather than stopping the server from starting.
+    """
+    try:
+        from mcp_fetch_server.rag.tools import register_rag_tools
+    except ImportError as exc:
+        logger.info(
+            "Corpus tools unavailable (%s). Install them with: uv sync --extra rag", exc
+        )
+        return
+
+    register_rag_tools(mcp)
+    logger.info("Corpus tools registered (net_mode=%s)", settings.net_mode)
+
+
 def _configure_logging() -> None:
     logging.basicConfig(
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -142,6 +161,7 @@ def create_mcp_server(
     register_resources(mcp)
     register_prompts(mcp)
     register_completions(mcp)
+    register_corpus_tools(mcp)
 
     if settings.admin_enabled and transport == "streamable-http":
         AdminPanel(mcp=mcp, transport=transport).register_routes(mcp)

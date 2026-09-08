@@ -113,6 +113,40 @@ Measured on the development machine: about 4.8 s per document to enrich, and
 about 0.4 s to classify (classification only sees the title, summary and
 tags).
 
+## Embedding and searching
+
+```bash
+mcp-fetch-server embed                  # chunks -> vectors
+mcp-fetch-server search "your question" # search from the terminal
+```
+
+Qdrant runs either as a server (`FETCH_QDRANT_URL=http://localhost:6333`, via
+Compose) or **embedded on local disk** when that setting is empty. Embedded
+mode means a single-user offline setup needs no Docker at all.
+
+Every chunk is indexed twice. The `dense` vector comes from `bge-m3` and
+carries meaning; the `sparse` vector is term frequency computed locally, and
+Qdrant applies IDF itself, so ingestion stays stateless and adding documents
+never invalidates weights already written. A query runs both arms and fuses
+them with reciprocal rank fusion, which needs no calibration between two
+incomparable scoring scales.
+
+That second arm is not a nicety. Searching the test corpus for `bge-m3`
+returns the *Persian* document that mentions it ahead of the English ones — an
+exact-token match a purely semantic index loses. Persian text is normalised
+before tokenising (Arabic vs Persian yeh and kaf, alef variants, ZWNJ,
+diacritics, Persian and Arabic-Indic digits), without which lexical search on
+a Persian corpus misses most of its matches.
+
+Chunk text lives in SQLite, not in the Qdrant payload. The catalog stays
+authoritative, payloads stay small, and the whole index can be dropped and
+rebuilt without re-parsing a single source file.
+
+MCP tools added: `rag_search` (ranked passages with citable URLs) and
+`corpus_stats` (what the corpus can answer). Resources: `corpus://stats`,
+`corpus://taxonomy`, `corpus://doc/{doc_id}`. They register only when the
+`rag` extra is installed; without it this stays a plain web fetch server.
+
 ## Hardware notes
 
 Measured on the development machine (RTX 4060 8 GB, i7-14700K, 128 GB RAM):
@@ -157,8 +191,9 @@ These are the choices that decide whether answers are trustworthy:
       blob store, incremental `ingest` command.
 - [x] **P2 — Enrichment.** Summaries, tags, entities, hypothetical questions,
       taxonomy bootstrap and classification.
-- [ ] **P3 — Retrieval.** Qdrant collections, hybrid search, reranking,
-      `rag_search` tool.
+- [x] **P3 — Retrieval.** Qdrant collections, hybrid dense + sparse search
+      fused with RRF, `rag_search` and `corpus_stats` tools, `corpus://`
+      resources. Cross-encoder reranking moves to P5.
 - [ ] **P4 — Simulated internet.** Site generator, URL resolver, local search
       backend, link graph; the fetch tools start serving the corpus.
 - [ ] **P5 — Accuracy.** Small-to-big, query expansion, deduplication,

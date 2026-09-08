@@ -230,3 +230,23 @@ def test_cli_explicit_serve_subcommand(monkeypatch):
     assert cli_main(["serve", "--transport", "streamable-http", "--port", "9000"]) == 0
     assert captured["transport"] == "streamable-http"
     assert captured["port"] == 9000
+
+
+async def test_check_qdrant_reports_embedded_mode(monkeypatch):
+    """An empty URL means Qdrant runs embedded on disk, which is a supported
+    setup, not a misconfiguration."""
+    monkeypatch.setattr(settings, "qdrant_url", "")
+    report = doctor.Report()
+    await doctor.check_qdrant(report)
+    assert _status(report, "qdrant") == "ok"
+    assert "embedded" in report.render()
+    assert report.failed is False
+
+
+@respx.mock
+async def test_check_qdrant_suggests_embedded_mode_when_down(monkeypatch):
+    monkeypatch.setattr(settings, "qdrant_url", QDRANT)
+    respx.get(f"{QDRANT}/").mock(side_effect=httpx.ConnectError("refused"))
+    report = doctor.Report()
+    await doctor.check_qdrant(report)
+    assert "FETCH_QDRANT_URL empty" in report.render()

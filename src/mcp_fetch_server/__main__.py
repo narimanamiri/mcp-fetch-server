@@ -10,7 +10,16 @@ from mcp_fetch_server.server import run_server
 
 # Subcommands are opt-in: anything else is treated as `serve` arguments so
 # existing launchers (`mcp-fetch-server --transport stdio`) keep working.
-SUBCOMMANDS = {"serve", "doctor", "ingest", "enrich", "taxonomy", "classify"}
+SUBCOMMANDS = {
+    "serve",
+    "doctor",
+    "ingest",
+    "enrich",
+    "taxonomy",
+    "classify",
+    "embed",
+    "search",
+}
 
 
 def _parse_serve_args(argv: list[str]) -> argparse.Namespace:
@@ -285,6 +294,111 @@ def _taxonomy(argv: list[str]) -> int:
     return 0
 
 
+def _embed(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="mcp-fetch-server embed",
+        description="Embed catalogued chunks into the vector store",
+    )
+    parser.add_argument("--reembed", action="store_true", help="Re-embed every document")
+    parser.add_argument(
+        "--recreate",
+        action="store_true",
+        help="Drop and rebuild the collection first (needed after changing embedding model)",
+    )
+    parser.add_argument("--limit", type=int, default=None, help="Stop after N documents")
+    parser.add_argument("--json", action="store_true", help="Emit the summary as JSON")
+    parser.add_argument("--quiet", action="store_true", help="Only print the final summary")
+    args = parser.parse_args(argv)
+
+    import asyncio
+    import json
+
+    from mcp_fetch_server.rag.catalog import Catalog
+    from mcp_fetch_server.rag.embed import EmbedResult, run_embedding
+    from mcp_fetch_server.rag.llm import LLMError
+    from mcp_fetch_server.rag.store import StoreError, VectorStore
+
+    def report(result: EmbedResult) -> None:
+        if args.quiet or args.json:
+            return
+        marker = {"embedded": "+", "skipped": "=", "failed": "!"}[result.status]
+        detail = (
+            result.error
+            if result.status == "failed"
+            else f"{result.title or result.doc_id}: {result.chunks} chunks"
+        )
+        print(f"{marker} {detail}")
+
+    async def run() -> object:
+        with Catalog() as catalog, VectorStore() as store:
+            return await run_embedding(
+                catalog=catalog,
+                store=store,
+                reembed=args.reembed,
+                recreate=args.recreate,
+                limit=args.limit,
+                on_result=report,
+            )
+
+    try:
+        summary = asyncio.run(run())
+    except (LLMError, StoreError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(summary.as_dict(), indent=2, ensure_ascii=False))
+    else:
+        if not args.quiet:
+            print()
+        print(summary.render())
+    return 1 if summary.failed else 0
+
+
+def _search(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="mcp-fetch-server search",
+        description="Search the local corpus from the command line",
+    )
+    parser.add_argument("query", help="What to look for")
+    parser.add_argument("-k", "--top-k", type=int, default=None, help="Passages to return")
+    parser.add_argument("--category", action="append", default=None, help="Filter by category")
+    parser.add_argument("--language", action="append", default=None, help="Filter by language")
+    parser.add_argument("--json", action="store_true", help="Emit results as JSON")
+    args = parser.parse_args(argv)
+
+    import asyncio
+    import json
+
+    from mcp_fetch_server.rag.llm import LLMError
+    from mcp_fetch_server.rag.retrieve import Retriever
+    from mcp_fetch_server.rag.store import StoreError
+
+    async def run() -> object:
+        retriever = Retriever()
+        try:
+            return await retriever.search(
+                args.query,
+                top_k=args.top_k,
+                categories=args.category,
+                languages=args.language,
+            )
+        finally:
+            retriever.close()
+
+    try:
+        result = asyncio.run(run())
+    except (LLMError, StoreError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(result.as_dict(), indent=2, ensure_ascii=False))
+    else:
+        print(result.render())
+    return 0 if result else 1
+
+
 def _force_utf8_output() -> None:
     """Make stdout/stderr UTF-8 safe.
 
@@ -321,6 +435,10 @@ def main(argv: list[str] | None = None) -> int:
         return _classify(rest)
     if command == "taxonomy":
         return _taxonomy(rest)
+    if command == "embed":
+        return _embed(rest)
+    if command == "search":
+        return _search(rest)
     return _serve(rest)
 
 
