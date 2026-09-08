@@ -56,6 +56,29 @@ Checks the local model, its chat and embedding models, the embedding size,
 Qdrant, and the corpus directory. Exits non-zero if anything is broken, so it
 can gate an ingestion run in a script. `--json` emits the same report as JSON.
 
+## Ingesting
+
+```bash
+uv run mcp-fetch-server ingest ./corpus
+```
+
+Walks directories, loads every supported file, and stores each document as
+canonical Markdown in the blob store with its chunks in the catalog. Runs
+incrementally: a file whose bytes have not changed is skipped, so re-running
+over a large corpus costs a directory walk. `--reingest` forces the work,
+`--dry-run` lists what would be ingested, and `--json` emits a machine-readable
+summary.
+
+Supported formats: `.pdf`, `.docx`, `.pptx`, `.epub`, `.html`, `.md`, `.txt`.
+Scanned PDFs are rejected with a pointer to `ocrmypdf` rather than ingested as
+empty documents.
+
+| Setting | Default | Effect |
+|---|---|---|
+| `FETCH_CHUNK_TARGET_TOKENS` | `600` | Token budget per chunk |
+| `FETCH_CHUNK_OVERLAP_RATIO` | `0.15` | Overlap carried between chunks |
+| `FETCH_CHUNK_SECTION_BREAK_LEVEL` | `2` | Headings at or above this level start a new chunk |
+
 ## Hardware notes
 
 Measured on the development machine (RTX 4060 8 GB, i7-14700K, 128 GB RAM):
@@ -95,8 +118,9 @@ These are the choices that decide whether answers are trustworthy:
 - [x] **P0 — Foundation.** Settings, `rag.llm` local model client (Ollama +
       OpenAI-compatible), `doctor` preflight command, Qdrant in Compose,
       optional `rag` dependency extra.
-- [ ] **P1 — Ingest.** Loaders, structure-aware chunking, SQLite catalog,
-      content-addressed blob store, `ingest` command.
+- [x] **P1 — Ingest.** Loaders (PDF, DOCX, PPTX, EPUB, HTML, Markdown,
+      text), structure-aware chunking, SQLite catalog, content-addressed
+      blob store, incremental `ingest` command.
 - [ ] **P2 — Enrichment.** Summaries, tags, entities, hypothetical questions,
       taxonomy bootstrap and classification.
 - [ ] **P3 — Retrieval.** Qdrant collections, hybrid search, reranking,

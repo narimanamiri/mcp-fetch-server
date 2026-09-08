@@ -103,6 +103,10 @@ class Settings(BaseSettings):
     # Chunking
     chunk_target_tokens: int = Field(default=600, alias="FETCH_CHUNK_TARGET_TOKENS")
     chunk_overlap_ratio: float = Field(default=0.15, alias="FETCH_CHUNK_OVERLAP_RATIO")
+    # Headings at or above this level start a new chunk. Deeper subsections
+    # pack together until the token budget is reached, so a document with many
+    # short "###" sections does not turn into a pile of 30-token chunks.
+    chunk_section_break_level: int = Field(default=2, alias="FETCH_CHUNK_SECTION_BREAK_LEVEL")
 
     # Retrieval
     rag_top_k: int = Field(default=8, alias="FETCH_RAG_TOP_K")
