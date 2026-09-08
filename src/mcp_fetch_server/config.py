@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Literal
+from urllib.parse import urlparse
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -62,6 +66,56 @@ class Settings(BaseSettings):
     admin_host: str = Field(default="127.0.0.1", alias="FETCH_ADMIN_HOST")
     admin_port: int = Field(default=8001, alias="FETCH_ADMIN_PORT")
 
+    # ----------------------------------------------------------------------
+    # Offline corpus / RAG
+    # ----------------------------------------------------------------------
+    # How fetch_url / web_search / extract_links resolve requests:
+    #   online  - always the real network (current behaviour, default)
+    #   offline - only the local corpus; the network is never touched
+    #   hybrid  - local corpus first, real network as a fallback
+    net_mode: Literal["online", "offline", "hybrid"] = Field(
+        default="online", alias="FETCH_NET_MODE"
+    )
+
+    # Local model used server-side for enrichment, categorisation and answers.
+    # This is separate from MCP sampling, which uses the *client's* model.
+    llm_backend: Literal["ollama", "openai"] = Field(default="ollama", alias="FETCH_LLM_BACKEND")
+    llm_base_url: str = Field(default="http://localhost:11434", alias="FETCH_LLM_BASE_URL")
+    llm_chat_model: str = Field(default="gemma3:4b", alias="FETCH_LLM_CHAT_MODEL")
+    llm_embed_model: str = Field(default="bge-m3", alias="FETCH_LLM_EMBED_MODEL")
+    llm_api_key: str | None = Field(default=None, alias="FETCH_LLM_API_KEY")
+    llm_timeout_seconds: float = Field(default=120.0, alias="FETCH_LLM_TIMEOUT_SECONDS")
+    llm_max_concurrency: int = Field(default=2, alias="FETCH_LLM_MAX_CONCURRENCY")
+    llm_retries: int = Field(default=2, alias="FETCH_LLM_RETRIES")
+    # Ollama keep_alive: how long a model stays resident in VRAM after a call.
+    llm_keep_alive: str = Field(default="5m", alias="FETCH_LLM_KEEP_ALIVE")
+    llm_num_ctx: int = Field(default=8192, alias="FETCH_LLM_NUM_CTX")
+    llm_embed_batch_size: int = Field(default=16, alias="FETCH_LLM_EMBED_BATCH_SIZE")
+
+    # Qdrant vector store
+    qdrant_url: str = Field(default="http://localhost:6333", alias="FETCH_QDRANT_URL")
+    qdrant_api_key: str | None = Field(default=None, alias="FETCH_QDRANT_API_KEY")
+    qdrant_collection: str = Field(default="corpus_chunks", alias="FETCH_QDRANT_COLLECTION")
+
+    # Corpus storage (SQLite catalog, blob store, rendered page cache, taxonomy)
+    corpus_data_dir: str = Field(default="./data", alias="FETCH_CORPUS_DATA_DIR")
+
+    # Chunking
+    chunk_target_tokens: int = Field(default=600, alias="FETCH_CHUNK_TARGET_TOKENS")
+    chunk_overlap_ratio: float = Field(default=0.15, alias="FETCH_CHUNK_OVERLAP_RATIO")
+
+    # Retrieval
+    rag_top_k: int = Field(default=8, alias="FETCH_RAG_TOP_K")
+    rag_candidates: int = Field(default=50, alias="FETCH_RAG_CANDIDATES")
+    rag_rerank_enabled: bool = Field(default=True, alias="FETCH_RAG_RERANK_ENABLED")
+    rag_reranker_model: str = Field(
+        default="BAAI/bge-reranker-v2-m3", alias="FETCH_RAG_RERANKER_MODEL"
+    )
+
+    # Base URL minted for locally ingested documents, and the host that the
+    # offline resolver answers for. Never DNS-resolved.
+    site_base_url: str = Field(default="https://local.archive", alias="FETCH_SITE_BASE_URL")
+
     @property
     def allowed_domain_set(self) -> set[str]:
         if not self.allowed_domains.strip():
@@ -71,6 +125,20 @@ class Settings(BaseSettings):
             for domain in self.allowed_domains.split(",")
             if domain.strip()
         }
+
+    @property
+    def site_host(self) -> str:
+        """Hostname portion of site_base_url (e.g. 'local.archive')."""
+        return (urlparse(self.site_base_url).hostname or "").lower()
+
+    @property
+    def corpus_dir(self) -> Path:
+        """Root directory for the SQLite catalog, blob store and page cache."""
+        return Path(self.corpus_data_dir).expanduser()
+
+    @property
+    def offline_enabled(self) -> bool:
+        return self.net_mode in ("offline", "hybrid")
 
 
 settings = Settings()

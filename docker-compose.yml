@@ -11,8 +11,10 @@
 #   Admin GUI    : http://localhost:8000/admin
 #   Health       : http://localhost:8000/health
 #   SearXNG UI   : http://localhost:8080  (web_search fallback backend)
-
-version: "3.8"
+#   Qdrant       : http://localhost:6333/dashboard  (offline corpus vectors)
+#
+# Ollama is NOT in this stack: it needs the host GPU. Run `ollama serve` on
+# the host; containers reach it at http://host.docker.internal:11434.
 
 services:
   mcp-fetch-server:
@@ -32,10 +34,21 @@ services:
       FETCH_LOCAL_FILES_ROOT: /workspace
       FETCH_ADMIN_ENABLED: ${FETCH_ADMIN_ENABLED:-true}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Offline corpus / RAG
+      FETCH_NET_MODE: ${FETCH_NET_MODE:-online}
+      FETCH_QDRANT_URL: http://qdrant:6333
+      FETCH_CORPUS_DATA_DIR: /data
+      FETCH_LLM_BASE_URL: ${FETCH_LLM_BASE_URL:-http://host.docker.internal:11434}
     volumes:
       - ./workspace:/workspace
+      - ./data:/data
+    extra_hosts:
+      # Lets the container reach Ollama on the host. Native on Docker Desktop;
+      # host-gateway makes it work on Linux too.
+      - "host.docker.internal:host-gateway"
     depends_on:
       - searxng
+      - qdrant
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 30s
@@ -76,3 +89,30 @@ services:
       options:
         max-size: "1m"
         max-file: "1"
+
+  qdrant:
+    image: docker.io/qdrant/qdrant:latest
+    container_name: mcp-fetch-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant-storage:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__API_KEY: ${FETCH_QDRANT_API_KEY:-}
+      QDRANT__LOG_LEVEL: ${QDRANT_LOG_LEVEL:-INFO}
+    healthcheck:
+      # Qdrant images ship no curl/wget, so probe with its own binary.
+      test: ["CMD", "/qdrant/qdrant", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "1"
+
+volumes:
+  qdrant-storage:

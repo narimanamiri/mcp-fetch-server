@@ -35,4 +35,23 @@ def public_settings() -> dict[str, Any]:
         "auth_enabled": bool(settings.mcp_auth_token),
         "rate_limit_per_minute": settings.rate_limit_per_minute,
         "log_level": settings.log_level,
+        # Offline corpus / RAG. Secrets (llm_api_key, qdrant_api_key) are
+        # reported as booleans only.
+        "net_mode": settings.net_mode,
+        "site_base_url": settings.site_base_url,
+        "corpus_data_dir": str(settings.corpus_dir),
+        "llm_backend": settings.llm_backend,
+        "llm_base_url": settings.llm_base_url,
+        "llm_chat_model": settings.llm_chat_model,
+        "llm_embed_model": settings.llm_embed_model,
+        "llm_api_key_set": bool(settings.llm_api_key),
+        "llm_max_concurrency": settings.llm_max_concurrency,
+        "qdrant_url": settings.qdrant_url,
+        "qdrant_collection": settings.qdrant_collection,
+        "qdrant_api_key_set": bool(settings.qdrant_api_key),
+        "chunk_target_tokens": settings.chunk_target_tokens,
+        "chunk_overlap_ratio": settings.chunk_overlap_ratio,
+        "rag_top_k": settings.rag_top_k,
+        "rag_candidates": settings.rag_candidates,
+        "rag_rerank_enabled": settings.rag_rerank_enabled,
     }
