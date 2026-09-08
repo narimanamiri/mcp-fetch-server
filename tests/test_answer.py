@@ -242,6 +242,12 @@ def test_fuse_empty():
 # --------------------------------------------------------------- rerank
 
 
+def test_reranking_is_off_by_default():
+    """Measured on the development corpus, reranking lowered recall and raised
+    query latency from 37 ms to 1.5 s, so it is opt-in."""
+    assert settings.rag_rerank_enabled is False
+
+
 def test_passage_text_includes_heading_context():
     item = hit("d1:0", text="Body.")
     item.heading_path = ["Guide", "Install"]
@@ -269,7 +275,8 @@ class BrokenReranker(CrossEncoderReranker):
         raise RerankUnavailable("not installed")
 
 
-async def test_rerank_reorders_by_score():
+async def test_rerank_reorders_by_score(monkeypatch):
+    monkeypatch.setattr(settings, "rag_rerank_enabled", True)
     hits = [hit("a:0", score=1.0), hit("b:0", doc="d2", score=0.9), hit("c:0", doc="d3")]
     reranked, applied = await maybe_rerank(
         "query", hits, reranker=FakeReranker([0.1, 9.0, 5.0])
@@ -284,8 +291,9 @@ async def test_rerank_respects_top_k():
     assert len(reranked) == 2
 
 
-async def test_missing_reranker_degrades_to_fused_order():
+async def test_missing_reranker_degrades_to_fused_order(monkeypatch):
     """A missing dependency must cost quality, never availability."""
+    monkeypatch.setattr(settings, "rag_rerank_enabled", True)
     hits = [hit("a:0", score=2.0), hit("b:0", doc="d2", score=1.0)]
     result, applied = await maybe_rerank("query", hits, reranker=BrokenReranker())
     assert applied is False
@@ -300,7 +308,8 @@ async def test_rerank_disabled_by_configuration(monkeypatch):
     assert result == hits
 
 
-async def test_rerank_empty_input():
+async def test_rerank_empty_input(monkeypatch):
+    monkeypatch.setattr(settings, "rag_rerank_enabled", True)
     result, applied = await maybe_rerank("q", [], reranker=FakeReranker([]))
     assert result == []
     assert applied is False

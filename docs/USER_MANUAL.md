@@ -6,6 +6,7 @@ Complete guide for installing, configuring, and using the MCP Web Fetch Server w
 |----------|----------|
 | This file | End users — installation, daily use, troubleshooting |
 | [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md) | Developers — architecture, APIs, security, deployment internals |
+| [RAG_PLAN.md](RAG_PLAN.md) | Feeding the server your own documents and browsing them offline |
 | [../README.md](../README.md) | Quick start summary |
 
 **Version:** 0.1.0

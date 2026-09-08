@@ -728,3 +728,39 @@ Regression tests: `test_security.py`, `test_fetch_client.py`.
 ---
 
 *MCP Web Fetch Server v0.1.0 — MIT License*
+
+---
+
+## Offline corpus (`rag/` package)
+
+Optional, enabled by `uv sync --extra rag`. Without it the server runs
+unchanged as a web fetch server; `register_corpus_tools` logs and returns.
+
+| Module | Responsibility |
+|--------|----------------|
+| `rag/llm.py` | Client for a local model (Ollama or OpenAI-compatible), including schema-constrained JSON output |
+| `rag/documents.py` | `Block` / `NormalizedDoc` / `Chunk`, canonical Markdown rendering, token estimation |
+| `rag/loaders.py` | PDF, DOCX, PPTX, EPUB, HTML, Markdown and text into structured blocks |
+| `rag/chunking.py` | Heading- and page-aware chunking with overlap |
+| `rag/catalog.py` | SQLite catalog plus content-addressed blob store (the source of truth) |
+| `rag/ingest.py` | Incremental ingestion pipeline |
+| `rag/enrich.py` | Titles, summaries, tags, entities, hypothetical questions |
+| `rag/taxonomy.py` | Category bootstrap and constrained classification |
+| `rag/sparse.py` | Lexical vectors with Persian/Arabic normalisation |
+| `rag/store.py` | Qdrant collections, upsert, hybrid search |
+| `rag/embed.py` | The embedding pass |
+| `rag/retrieve.py` | Query orchestration: search, hydrate, rerank, deduplicate |
+| `rag/rerank.py` | Optional CPU cross-encoder reranking |
+| `rag/expand.py` | Query rewriting and rank fusion |
+| `rag/answer.py` | Grounded answers with verified citations |
+| `rag/site.py` | The archive rendered as a browsable website |
+| `rag/offline.py` | URL resolution against the corpus |
+| `rag/tools.py` | `rag_search`, `rag_answer`, `corpus_stats`, `corpus://` resources |
+| `rag/evaluate.py` | Retrieval evaluation harness |
+| `rag/doctor.py` | Preflight checks |
+
+Interception points in the existing server: `fetch_service._fetch`,
+`search.search_web`, and `tools_extra.run_extract_links`. Corpus resolution
+runs strictly before the SSRF and robots checks and never relaxes them.
+
+See [RAG_PLAN.md](RAG_PLAN.md) for the design rationale and measurements.

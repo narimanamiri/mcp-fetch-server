@@ -19,6 +19,7 @@ SUBCOMMANDS = {
     "classify",
     "embed",
     "search",
+    "eval",
 }
 
 
@@ -420,6 +421,83 @@ def _search(argv: list[str]) -> int:
     return 0 if (args.answer or result) else 1
 
 
+def _eval(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="mcp-fetch-server eval",
+        description="Measure retrieval quality against a golden set",
+    )
+    parser.add_argument(
+        "golden",
+        nargs="?",
+        default=None,
+        help="JSONL golden set. Omit with --from-corpus to build one automatically.",
+    )
+    parser.add_argument(
+        "--from-corpus",
+        action="store_true",
+        help="Build cases from the questions enrichment produced for each document",
+    )
+    parser.add_argument("--write", default=None, help="Save the generated golden set here")
+    parser.add_argument("-k", "--top-k", type=int, default=8, help="Passages to consider")
+    parser.add_argument("--limit", type=int, default=None, help="Cap the number of cases")
+    parser.add_argument("--expand", action="store_true", help="Evaluate with query expansion")
+    parser.add_argument(
+        "--no-rerank", action="store_true", help="Evaluate without cross-encoder reranking"
+    )
+    parser.add_argument("--json", action="store_true", help="Emit the report as JSON")
+    args = parser.parse_args(argv)
+
+    import asyncio
+    import json
+
+    from mcp_fetch_server.rag.catalog import Catalog
+    from mcp_fetch_server.rag.evaluate import (
+        EvalError,
+        golden_from_corpus,
+        load_golden,
+        run_evaluation,
+        write_golden,
+    )
+
+    try:
+        if args.from_corpus:
+            with Catalog() as catalog:
+                cases = golden_from_corpus(catalog, limit=args.limit)
+            if not cases:
+                print(
+                    "No questions to evaluate with. Run `mcp-fetch-server enrich` first, "
+                    "or supply a golden set file.",
+                    file=sys.stderr,
+                )
+                return 1
+            if args.write:
+                print(f"Wrote {len(cases)} cases to {write_golden(cases, args.write)}")
+        elif args.golden:
+            cases = load_golden(args.golden)
+            if args.limit is not None:
+                cases = cases[: args.limit]
+        else:
+            parser.error("provide a golden set file or --from-corpus")
+    except EvalError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    report = asyncio.run(
+        run_evaluation(
+            cases,
+            top_k=args.top_k,
+            expand=args.expand,
+            rerank=False if args.no_rerank else None,
+        )
+    )
+
+    if args.json:
+        print(json.dumps(report.as_dict(), indent=2, ensure_ascii=False))
+    else:
+        print(report.render())
+    return 0
+
+
 def _force_utf8_output() -> None:
     """Make stdout/stderr UTF-8 safe.
 
@@ -460,6 +538,8 @@ def main(argv: list[str] | None = None) -> int:
         return _embed(rest)
     if command == "search":
         return _search(rest)
+    if command == "eval":
+        return _eval(rest)
     return _serve(rest)
 
 

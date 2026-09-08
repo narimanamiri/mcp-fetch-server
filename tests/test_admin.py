@@ -199,3 +199,45 @@ async def test_admin_tools_list_on_streamable_http_app() -> None:
     names = {tool["name"] for tool in tools.json()}
     assert "fetch_url" in names
     assert "web_search" in names
+
+
+def test_corpus_payload_reports_unavailable_without_a_corpus(tmp_path, monkeypatch):
+    """A dashboard on a plain fetch server must hide the section, not error."""
+    from mcp_fetch_server.admin import corpus_payload
+    from mcp_fetch_server.config import settings
+
+    monkeypatch.setattr(settings, "corpus_data_dir", str(tmp_path / "empty"))
+    payload = corpus_payload()
+    assert payload["available"] is True
+    assert payload["documents"] == 0
+
+
+def test_corpus_payload_summarises_a_corpus(tmp_path, monkeypatch):
+    from mcp_fetch_server.admin import corpus_payload
+    from mcp_fetch_server.config import settings
+    from mcp_fetch_server.rag.catalog import Catalog, DocumentRecord, make_doc_id
+
+    monkeypatch.setattr(settings, "corpus_data_dir", str(tmp_path / "data"))
+    url = "https://local.archive/doc/a-1"
+    with Catalog() as catalog:
+        digest, blob_path = catalog.store_blob("# T\n\nBody.")
+        catalog.upsert_document(
+            DocumentRecord(
+                doc_id=make_doc_id(url),
+                url=url,
+                content_hash=digest,
+                doctype="markdown",
+                blob_path=blob_path,
+                title="A Doc",
+                language="en",
+                categories=["research"],
+                char_count=12,
+            )
+        )
+
+    payload = corpus_payload()
+    assert payload["available"] is True
+    assert payload["documents"] == 1
+    assert payload["categories"] == {"research": 1}
+    assert payload["recent"][0]["title"] == "A Doc"
+    assert "index" in payload

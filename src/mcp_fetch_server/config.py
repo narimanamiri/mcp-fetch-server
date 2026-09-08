@@ -111,7 +111,12 @@ class Settings(BaseSettings):
     # Retrieval
     rag_top_k: int = Field(default=8, alias="FETCH_RAG_TOP_K")
     rag_candidates: int = Field(default=50, alias="FETCH_RAG_CANDIDATES")
-    rag_rerank_enabled: bool = Field(default=True, alias="FETCH_RAG_RERANK_ENABLED")
+    # Off by default, on evidence rather than principle. Measured on the
+    # development corpus, cross-encoder reranking *lowered* recall@5 from
+    # 100% to 92% and nDCG from 0.818 to 0.779 while raising median query
+    # latency from 37 ms to 1.5 s. Whether it helps depends on the corpus, so
+    # measure with `mcp-fetch-server eval` before turning it on.
+    rag_rerank_enabled: bool = Field(default=False, alias="FETCH_RAG_RERANK_ENABLED")
     # Multilingual by design: an English-only reranker would push every
     # Persian passage down the list. Runs on CPU via ONNX, keeping the GPU
     # free for the embedding and chat models.

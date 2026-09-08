@@ -6,6 +6,7 @@ background port (default ``127.0.0.1:8001``) when using stdio with Cursor.
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -21,6 +22,8 @@ from mcp_fetch_server import __version__
 from mcp_fetch_server.config import settings
 from mcp_fetch_server.config_snapshot import public_settings
 from mcp_fetch_server.history import history
+
+logger = logging.getLogger(__name__)
 
 _DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -221,6 +224,15 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
     <div class="grid" id="stats"></div>
 
+    <section id="corpus-section" style="display:none;">
+      <h2>Offline corpus</h2>
+      <div class="body">
+        <div class="grid" id="corpus-stats"></div>
+        <div id="corpus-categories" style="margin-top:0.75rem;"></div>
+        <div id="corpus-docs" style="margin-top:0.75rem;"></div>
+      </div>
+    </section>
+
     <section>
       <h2>Registered tools</h2>
       <div class="body" id="tools"><div class="empty">Loading…</div></div>
@@ -355,6 +367,47 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
           `<td>${escapeHtml(t.description || "")}</td></tr>`
         ).join("") + "</tbody></table>";
     }
+    async function loadCorpus() {
+      let data;
+      try {
+        data = await api("/corpus");
+      } catch (err) {
+        return;  // the corpus extra may not be installed
+      }
+      if (!data || !data.available) return;
+      document.getElementById("corpus-section").style.display = "";
+
+      const idx = data.index || {};
+      document.getElementById("corpus-stats").innerHTML = [
+        ["Documents", data.documents],
+        ["Passages", data.chunks],
+        ["Indexed vectors", idx.points === undefined ? "not built" : idx.points],
+        ["Corpus mode", data.net_mode],
+      ].map(([label, value]) =>
+        `<div class="card"><div class="label">${label}</div><div class="value">${value}</div></div>`
+      ).join("");
+
+      const cats = data.categories || {};
+      const names = Object.keys(cats);
+      document.getElementById("corpus-categories").innerHTML = names.length
+        ? "<table><thead><tr><th>Category</th><th>Documents</th></tr></thead><tbody>" +
+          names.map(function (name) {
+            return "<tr><td>" + escapeHtml(name) + "</td><td>" + cats[name] + "</td></tr>";
+          }).join("") + "</tbody></table>"
+        : '<div class="empty">No categories assigned yet.</div>';
+
+      const docs = data.recent || [];
+      document.getElementById("corpus-docs").innerHTML = docs.length
+        ? "<table><thead><tr><th>Title</th><th>Type</th><th>Lang</th><th>Passages</th><th>URL</th></tr></thead><tbody>" +
+          docs.map(function (d) {
+            return "<tr><td>" + escapeHtml(d.title || d.doc_id) + "</td><td>" +
+              escapeHtml(d.doctype) + "</td><td>" + escapeHtml(d.language || "") +
+              "</td><td>" + d.chunks + '</td><td><a href="' + escapeHtml(d.url) + '">' +
+              escapeHtml(d.url) + "</a></td></tr>";
+          }).join("") + "</tbody></table>"
+        : '<div class="empty">No documents ingested yet.</div>';
+    }
+
     async function loadHistory() {
       const entries = await api("/history");
       if (!entries.length) {
@@ -427,6 +480,66 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
   </script>
 </body>
 </html>"""
+
+
+
+def corpus_payload() -> dict[str, Any]:
+    """Summarise the offline corpus for the dashboard.
+
+    Reports ``available: False`` rather than raising when the optional extra
+    is missing or the corpus has never been built, so the dashboard hides the
+    section instead of showing an error on a plain fetch server.
+    """
+    try:
+        from mcp_fetch_server.rag.catalog import Catalog
+    except ImportError:
+        return {"available": False, "reason": "The rag extra is not installed."}
+
+    try:
+        with Catalog() as catalog:
+            stats = catalog.stats()
+            categories: dict[str, int] = {}
+            for record in catalog.iter_documents():
+                for path in record.categories:
+                    categories[path] = categories.get(path, 0) + 1
+            recent = [
+                {
+                    "doc_id": record.doc_id,
+                    "title": record.title,
+                    "url": record.url,
+                    "doctype": record.doctype,
+                    "language": record.language,
+                    "chunks": record.chunk_count,
+                    "categories": record.categories,
+                    "embedded": record.embedded_at is not None,
+                }
+                for record in catalog.list_documents(limit=25)
+            ]
+    except Exception as exc:
+        logger.debug("Corpus summary unavailable: %s", exc)
+        return {"available": False, "reason": str(exc)}
+
+    payload: dict[str, Any] = {
+        "available": True,
+        "net_mode": settings.net_mode,
+        "site_base_url": settings.site_base_url,
+        "documents": stats["documents"],
+        "chunks": stats["chunks"],
+        "characters": stats["characters"],
+        "by_doctype": stats["by_doctype"],
+        "by_language": stats["by_language"],
+        "categories": dict(sorted(categories.items(), key=lambda item: -item[1])),
+        "recent": recent,
+    }
+
+    try:
+        from mcp_fetch_server.rag.store import VectorStore
+
+        with VectorStore() as store:
+            payload["index"] = store.stats()
+    except Exception as exc:
+        payload["index"] = {"exists": False, "error": str(exc)}
+    return payload
 
 
 class AdminPanel:
@@ -509,6 +622,14 @@ class AdminPanel:
             return JSONResponse({"error": "not_cached", "url": url}, status_code=404)
         return JSONResponse({"url": url, "content": content})
 
+    async def api_corpus(self, request: Request) -> Response:
+        """Offline corpus summary. Reports availability rather than failing,
+        so a dashboard on a server without the rag extra just hides the
+        section."""
+        if not self._authorized(request):
+            return self._unauthorized()
+        return JSONResponse(corpus_payload())
+
     async def api_clear_history(self, request: Request) -> Response:
         if not self._authorized(request):
             return self._unauthorized()
@@ -568,6 +689,7 @@ class AdminPanel:
                 Route("/admin/api/history", self.api_history, methods=["GET"]),
                 Route("/admin/api/cache", self.api_cache, methods=["GET"]),
                 Route("/admin/api/cache/content", self.api_cache_item, methods=["GET"]),
+                Route("/admin/api/corpus", self.api_corpus, methods=["GET"]),
                 Route("/admin/api/history/clear", self.api_clear_history, methods=["POST"]),
             ]
         )

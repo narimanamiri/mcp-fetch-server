@@ -8,6 +8,7 @@ An all-in-one Python MCP server for web research: fetch pages, search the web, b
 |----------|---------------|
 | [User Manual](docs/USER_MANUAL.md) | Full end-user guide: install (Docker/Linux/Windows), Cursor setup, all tools, admin GUI, config, troubleshooting |
 | [Project Documentation](docs/PROJECT_DOCUMENTATION.md) | Full technical reference: architecture, modules, MCP APIs, admin API, security, Docker stack, testing |
+| [Offline Corpus & RAG](docs/RAG_PLAN.md) | Turning the server into an offline archive a local model can browse and search |
 
 ## Features
 
@@ -19,6 +20,34 @@ An all-in-one Python MCP server for web research: fetch pages, search the web, b
 - `extract_links` — structured link/image extraction from a page
 - `summarize_url` — asks the connected client's LLM to summarize a page (MCP sampling)
 - `read_file` / `write_file` / `list_dir` — sandboxed local file access (opt-in, disabled by default)
+
+### Offline corpus (optional)
+
+Ingest your own documents and the same tools serve them instead of the web —
+an offline archive a local model can browse as if it were the internet.
+
+- `rag_search` — hybrid semantic + exact-term search over your documents, with citable URLs
+- `rag_answer` — an answer written from your documents alone, with numbered citations
+- `corpus_stats` — what the archive contains
+- `fetch_url`, `web_search`, `extract_links` transparently serve the archive when `FETCH_NET_MODE` is `offline` or `hybrid`
+
+```bash
+uv sync --extra rag
+ollama serve                                  # the local model lives on the host
+mcp-fetch-server ingest ./my-documents        # PDF, DOCX, PPTX, EPUB, HTML, MD, TXT
+mcp-fetch-server enrich                       # titles, summaries, tags, questions
+mcp-fetch-server taxonomy bootstrap           # propose categories, then edit the file
+mcp-fetch-server classify                     # file documents under them
+mcp-fetch-server embed                        # build the search index
+mcp-fetch-server search "your question"       # or --answer for a written answer
+```
+
+`mcp-fetch-server doctor` checks the whole stack before you start, and
+`mcp-fetch-server eval --from-corpus` measures retrieval quality so accuracy
+changes can be verified rather than assumed. Qdrant runs embedded on local
+disk when `FETCH_QDRANT_URL` is empty, so no Docker is needed.
+
+See [docs/RAG_PLAN.md](docs/RAG_PLAN.md) for the full picture.
 
 ### Other MCP capabilities
 - **Resources**: `config://settings`, `history://recent`, `fetch-cache://{encoded_url}`

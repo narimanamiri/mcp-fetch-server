@@ -213,6 +213,49 @@ rather than the model. Markers pointing at passages that were not retrieved
 are stripped: a citation that does not resolve is worse than none, because it
 looks checked.
 
+## Measuring retrieval quality
+
+Every accuracy change is a guess until it is measured. Turning reranking on,
+widening the context window, changing the chunk budget: each sounds like an
+improvement and any of them can make retrieval worse on a particular corpus.
+
+```bash
+mcp-fetch-server eval --from-corpus --write data/golden.jsonl
+mcp-fetch-server eval data/golden.jsonl -k 5
+mcp-fetch-server eval data/golden.jsonl -k 5 --expand
+```
+
+`--from-corpus` builds a golden set out of the hypothetical questions
+enrichment already produced. Each was written *from* a specific document, so
+that document is the expected answer. It is not a substitute for questions
+real users asked, but it is free, it uses the corpus's own vocabulary, and it
+catches regressions. A hand-written golden set is JSONL:
+
+```json
+{"question": "how are chunks split?", "doc_ids": ["ab12cd"], "must_contain": "heading"}
+```
+
+Reported metrics: recall@k (was the right document found at all), hit@1, MRR
+(how near the top) and nDCG@k (rank-weighted).
+
+### Why reranking is off by default
+
+Measured on the development corpus (5 documents, 25 generated questions):
+
+| | recall@5 | hit@1 | MRR | nDCG@5 | median latency |
+|---|---|---|---|---|---|
+| Hybrid only | **100%** | 60% | **0.757** | **0.818** | **37 ms** |
+| + cross-encoder | 92% | 60% | 0.731 | 0.779 | 1477 ms |
+
+Reranking *lowered* recall and nDCG while costing 40x the latency, and the
+multilingual reranker was slower still — over 24 s per query on CPU, since
+real 2000-character passages are far more work than the short strings a quick
+benchmark uses. So `FETCH_RAG_RERANK_ENABLED` defaults to `false`.
+
+This is a small sample on a small corpus and should not be read as a general
+verdict on reranking. It is a reason not to ship it on by default: measure it
+on your own corpus with `eval` before enabling it.
+
 ## Hardware notes
 
 Measured on the development machine (RTX 4060 8 GB, i7-14700K, 128 GB RAM):
@@ -264,8 +307,7 @@ These are the choices that decide whether answers are trustworthy:
       backend, link graph; the fetch tools serve the corpus.
 - [x] **P5 — Accuracy.** Cross-encoder reranking, query expansion,
       small-to-big context, metadata filters, `rag_answer`.
-- [ ] **P6 — Operations.** Evaluation harness, admin corpus tab, watch-folder
-      re-ingestion.
+- [x] **P6 — Operations.** Evaluation harness, admin corpus tab, documentation.
 
 ## Configuration
 
