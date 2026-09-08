@@ -100,8 +100,13 @@ services:
     volumes:
       - qdrant-storage:/qdrant/storage
     environment:
-      QDRANT__SERVICE__API_KEY: ${FETCH_QDRANT_API_KEY:-}
-      QDRANT__LOG_LEVEL: ${QDRANT_LOG_LEVEL:-INFO}
+      # Passed through only when actually set on the host. Written as
+      # "NAME: ${NAME:-}" instead, Compose would hand Qdrant an *empty* API
+      # key, which Qdrant reads as "authentication enabled" and then rejects
+      # every request with "Must provide an API key". The bare-name list form
+      # omits the variable entirely when it is unset.
+      - QDRANT__SERVICE__API_KEY
+      - QDRANT__LOG_LEVEL=${QDRANT_LOG_LEVEL:-INFO}
     healthcheck:
       # Qdrant images ship no curl/wget, so probe with its own binary.
       test: ["CMD", "/qdrant/qdrant", "--version"]
