@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 from mcp_fetch_server import links as links_module
 from mcp_fetch_server import search as search_module
 from mcp_fetch_server.config import settings
-from mcp_fetch_server.converters import UNTRUSTED_PREFIX
+from mcp_fetch_server.converters import ARCHIVE_PREFIX, UNTRUSTED_PREFIX
 from mcp_fetch_server.fetch_service import fetch_and_record
 from mcp_fetch_server.fetcher import FetchError
 from mcp_fetch_server.files import (
@@ -178,8 +178,10 @@ async def run_extract_links(url: str, *, max_links: int = 100) -> str:
         raise ToolError(str(exc)) from exc
 
     html_content = result.content
-    if html_content.startswith(UNTRUSTED_PREFIX):
-        html_content = html_content[len(UNTRUSTED_PREFIX) :]
+    for prefix in (UNTRUSTED_PREFIX, ARCHIVE_PREFIX):
+        if html_content.startswith(prefix):
+            html_content = html_content[len(prefix) :]
+            break
 
     found = links_module.extract_links(html_content, result.url, max_links=max_links)
     return links_module.format_links(found)

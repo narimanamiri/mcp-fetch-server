@@ -172,14 +172,50 @@ async def searxng_search(query: str, max_results: int | None = None) -> list[Sea
     return results
 
 
+async def corpus_search(query: str, max_results: int | None = None) -> list[SearchResult]:
+    """Search the local offline corpus, shaped as ordinary search results.
+
+    Snippets come from the best-matching passage rather than a document
+    summary, so an agent that only ever calls ``web_search`` still receives
+    grounded, query-relevant text.
+    """
+    try:
+        from mcp_fetch_server.rag.offline import search_corpus
+    except ImportError as exc:
+        raise SearchError("The offline corpus extra is not installed") from exc
+
+    limit = max_results if max_results is not None else settings.search_max_results
+    limit = max(1, min(limit, 20))
+
+    try:
+        rows = await search_corpus(query, limit)
+    except Exception as exc:
+        raise SearchError(f"Local corpus search failed: {exc}") from exc
+
+    if not rows:
+        raise SearchError("No documents in the local archive match this query.")
+    return [SearchResult(title=title, url=url, snippet=snippet) for title, url, snippet in rows]
+
+
 async def search_web(
     query: str, max_results: int | None = None
 ) -> tuple[list[SearchResult], str]:
-    """Search the web, preferring DuckDuckGo and falling back to SearXNG.
+    """Search, preferring the local corpus, then DuckDuckGo, then SearXNG.
 
-    Returns ``(results, backend_name)``. Raises ``SearchError`` only if both
-    backends fail (or if SearXNG isn't configured and DuckDuckGo fails).
+    Returns ``(results, backend_name)``. Raises ``SearchError`` only if every
+    available backend fails.
     """
+    if settings.offline_enabled:
+        try:
+            return await corpus_search(query, max_results=max_results), "corpus"
+        except SearchError as corpus_exc:
+            if settings.net_mode == "offline":
+                raise SearchError(
+                    f"{corpus_exc} The server is in offline mode, so the web was not "
+                    "searched."
+                ) from corpus_exc
+            logger.info("Local corpus had no answer, falling back to the web: %s", corpus_exc)
+
     try:
         return await web_search(query, max_results=max_results), "duckduckgo"
     except SearchError as ddg_exc:
@@ -203,6 +239,8 @@ def format_results(results: list[SearchResult], *, backend: str | None = None) -
         block = f"{index}. {result.title}\n   URL: {result.url}\n   {result.snippet}"
         blocks.append(block.rstrip())
     body = "\n\n".join(blocks)
-    if backend and backend != "duckduckgo":
+    # The corpus is not a "fallback" to announce: in offline mode it is the
+    # only web there is, and saying so just invites the model to distrust it.
+    if backend and backend not in ("duckduckgo", "corpus"):
         body = f"(results via fallback backend: {backend})\n\n{body}"
     return body

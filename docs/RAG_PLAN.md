@@ -147,6 +147,38 @@ MCP tools added: `rag_search` (ranked passages with citable URLs) and
 `corpus://taxonomy`, `corpus://doc/{doc_id}`. They register only when the
 `rag` extra is installed; without it this stays a plain web fetch server.
 
+## Browsing the archive
+
+Set `FETCH_NET_MODE=offline` (or `hybrid`) and the existing fetch tools serve
+the corpus instead of the network, with no change to their signatures:
+
+| URL | Page |
+|---|---|
+| `https://local.archive/` | Homepage: categories, recent documents, statistics |
+| `https://local.archive/category/<path>` | Documents in one category |
+| `https://local.archive/tag/<tag>` | Documents carrying one tag |
+| `https://local.archive/search?q=...` | Results, same ranking as `web_search` |
+| `https://local.archive/doc/<slug>` | One document, with metadata and related links |
+| `https://local.archive/doc/<slug>/raw` | Exactly the ingested text, no navigation |
+
+`web_search` returns the corpus as an ordinary result list, with each snippet
+taken from the best-matching *passage* rather than a document summary — so an
+agent that only ever calls `web_search` still gets grounded, query-relevant
+text. `extract_links` walks the archive's own link graph, so an agent can
+crawl from the homepage to a category to a document to its related documents.
+Documents ingested from the web keep their original URL and are served from
+the corpus under it.
+
+Pages are built once as a `Page` and rendered twice: to Markdown for reading
+and to HTML for link extraction. Generating HTML and converting it back would
+be lossy, because the stored blob is already Markdown and a round trip shifts
+the character offsets citations depend on.
+
+In `offline` mode a URL that is not in the archive fails with a message
+pointing at the homepage, and the network is never touched. Resolution happens
+strictly before the SSRF and robots checks, and does not relax them: the
+archive host is answered from SQLite and is never DNS-resolved.
+
 ## Hardware notes
 
 Measured on the development machine (RTX 4060 8 GB, i7-14700K, 128 GB RAM):
@@ -194,8 +226,8 @@ These are the choices that decide whether answers are trustworthy:
 - [x] **P3 — Retrieval.** Qdrant collections, hybrid dense + sparse search
       fused with RRF, `rag_search` and `corpus_stats` tools, `corpus://`
       resources. Cross-encoder reranking moves to P5.
-- [ ] **P4 — Simulated internet.** Site generator, URL resolver, local search
-      backend, link graph; the fetch tools start serving the corpus.
+- [x] **P4 — Simulated internet.** Site generator, URL resolver, local search
+      backend, link graph; the fetch tools serve the corpus.
 - [ ] **P5 — Accuracy.** Small-to-big, query expansion, deduplication,
       metadata filters, `rag_answer`.
 - [ ] **P6 — Operations.** Evaluation harness, admin corpus tab, watch-folder
