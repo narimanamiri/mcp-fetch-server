@@ -10,7 +10,7 @@ from mcp_fetch_server.server import run_server
 
 # Subcommands are opt-in: anything else is treated as `serve` arguments so
 # existing launchers (`mcp-fetch-server --transport stdio`) keep working.
-SUBCOMMANDS = {"serve", "doctor", "ingest"}
+SUBCOMMANDS = {"serve", "doctor", "ingest", "enrich", "taxonomy", "classify"}
 
 
 def _parse_serve_args(argv: list[str]) -> argparse.Namespace:
@@ -121,6 +121,170 @@ def _ingest(argv: list[str]) -> int:
     return 1 if summary.failed else 0
 
 
+def _enrich(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="mcp-fetch-server enrich",
+        description="Have the local model describe ingested documents",
+    )
+    parser.add_argument(
+        "--reenrich", action="store_true", help="Re-describe documents that already have metadata"
+    )
+    parser.add_argument("--limit", type=int, default=None, help="Stop after N documents")
+    parser.add_argument("--json", action="store_true", help="Emit the summary as JSON")
+    parser.add_argument("--quiet", action="store_true", help="Only print the final summary")
+    args = parser.parse_args(argv)
+
+    import asyncio
+    import json
+
+    from mcp_fetch_server.rag.catalog import Catalog
+    from mcp_fetch_server.rag.enrich import EnrichResult, run_enrichment
+
+    def report(result: EnrichResult) -> None:
+        if args.quiet or args.json:
+            return
+        marker = {"enriched": "+", "skipped": "=", "failed": "!"}[result.status]
+        detail = result.error if result.status == "failed" else (result.title or result.doc_id)
+        print(f"{marker} {detail}")
+
+    async def run() -> object:
+        with Catalog() as catalog:
+            return await run_enrichment(
+                catalog=catalog,
+                reenrich=args.reenrich,
+                limit=args.limit,
+                on_result=report,
+            )
+
+    summary = asyncio.run(run())
+
+    if args.json:
+        print(json.dumps(summary.as_dict(), indent=2, ensure_ascii=False))
+    else:
+        if not args.quiet:
+            print()
+        print(summary.render())
+    return 1 if summary.failed else 0
+
+
+def _classify(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="mcp-fetch-server classify",
+        description="Assign documents to categories from the taxonomy",
+    )
+    parser.add_argument(
+        "--reclassify",
+        action="store_true",
+        help="Re-classify documents that already have categories",
+    )
+    parser.add_argument("--limit", type=int, default=None, help="Stop after N documents")
+    parser.add_argument("--json", action="store_true", help="Emit the summary as JSON")
+    args = parser.parse_args(argv)
+
+    import asyncio
+    import json
+
+    from mcp_fetch_server.rag.catalog import Catalog
+    from mcp_fetch_server.rag.taxonomy import Taxonomy, TaxonomyError, run_classification
+
+    taxonomy = Taxonomy.load()
+    if not taxonomy:
+        print(
+            "No taxonomy yet. Create one with:\n"
+            "  mcp-fetch-server taxonomy bootstrap",
+            file=sys.stderr,
+        )
+        return 1
+
+    async def run() -> object:
+        with Catalog() as catalog:
+            return await run_classification(
+                catalog=catalog,
+                taxonomy=taxonomy,
+                reclassify=args.reclassify,
+                limit=args.limit,
+            )
+
+    try:
+        summary = asyncio.run(run())
+    except TaxonomyError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(summary.as_dict(), indent=2, ensure_ascii=False))
+    else:
+        print(summary.render())
+    return 1 if summary.failed else 0
+
+
+def _taxonomy(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="mcp-fetch-server taxonomy",
+        description="Inspect or create the corpus taxonomy",
+    )
+    parser.add_argument(
+        "action",
+        choices=["show", "bootstrap", "path"],
+        help="show: print it; bootstrap: propose one from the corpus; path: print its location",
+    )
+    parser.add_argument("--sample", type=int, default=60, help="Documents to sample when proposing")
+    parser.add_argument("--max-categories", type=int, default=20, help="Upper bound on categories")
+    parser.add_argument(
+        "--force", action="store_true", help="Overwrite an existing taxonomy file"
+    )
+    args = parser.parse_args(argv)
+
+    import asyncio
+
+    from mcp_fetch_server.rag.catalog import Catalog
+    from mcp_fetch_server.rag.taxonomy import Taxonomy, TaxonomyError, bootstrap_taxonomy
+
+    target = Taxonomy.default_path()
+
+    if args.action == "path":
+        print(target)
+        return 0
+
+    if args.action == "show":
+        taxonomy = Taxonomy.load()
+        if not taxonomy:
+            print(f"No taxonomy at {target}. Create one with: taxonomy bootstrap")
+            return 1
+        print(taxonomy.as_prompt_block())
+        print(f"\n{len(taxonomy)} categories in {target}")
+        return 0
+
+    if target.exists() and not args.force:
+        print(
+            f"A taxonomy already exists at {target}.\n"
+            "Categories are meant to be stable, so re-proposing them would orphan "
+            "existing classifications. Edit the file by hand, or pass --force.",
+            file=sys.stderr,
+        )
+        return 1
+
+    async def run() -> object:
+        with Catalog() as catalog:
+            return await bootstrap_taxonomy(
+                catalog=catalog,
+                sample_size=args.sample,
+                max_categories=args.max_categories,
+            )
+
+    try:
+        taxonomy = asyncio.run(run())
+    except TaxonomyError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    written = taxonomy.save()
+    print(taxonomy.as_prompt_block())
+    print(f"\nWrote {len(taxonomy)} categories to {written}")
+    print("Review and edit that file, then run: mcp-fetch-server classify")
+    return 0
+
+
 def _force_utf8_output() -> None:
     """Make stdout/stderr UTF-8 safe.
 
@@ -151,6 +315,12 @@ def main(argv: list[str] | None = None) -> int:
         return _doctor(rest)
     if command == "ingest":
         return _ingest(rest)
+    if command == "enrich":
+        return _enrich(rest)
+    if command == "classify":
+        return _classify(rest)
+    if command == "taxonomy":
+        return _taxonomy(rest)
     return _serve(rest)
 
 

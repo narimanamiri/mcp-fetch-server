@@ -79,6 +79,40 @@ empty documents.
 | `FETCH_CHUNK_OVERLAP_RATIO` | `0.15` | Overlap carried between chunks |
 | `FETCH_CHUNK_SECTION_BREAK_LEVEL` | `2` | Headings at or above this level start a new chunk |
 
+## Enriching and categorising
+
+```bash
+mcp-fetch-server enrich              # local model describes each document
+mcp-fetch-server taxonomy bootstrap  # propose categories from the corpus
+mcp-fetch-server taxonomy show       # review them
+mcp-fetch-server classify            # assign documents to those categories
+```
+
+Enrichment produces a title, summary, genre, tags, entities, publication date
+and a set of hypothetical questions per document. The questions are indexed
+alongside the text later: a user's phrasing resembles a question far more than
+it resembles the document's prose.
+
+Categorisation runs as a separate pass against a fixed taxonomy stored in
+`data/taxonomy.yaml`. Bootstrap proposes it once from the enriched corpus;
+after that the file is edited by hand and `classify` may only choose from it.
+Documents that fit nothing become `uncategorised` for review rather than
+inventing a new category. `taxonomy bootstrap` refuses to overwrite an
+existing file without `--force`, because re-proposing categories orphans every
+classification already made.
+
+**Schemas must be explicit.** Pydantic leaves fields with defaults out of
+`required`, and a 4B model then omits them entirely: genre, language,
+entities and published_at all came back missing, with defaults silently
+filling in `"other"` and empty lists. Both enrichment and classification now
+push hand-built JSON schemas where every field is required and closed sets are
+enums. Constraining the schema also made generation *faster*, from 8.6 s to
+4.8 s per document.
+
+Measured on the development machine: about 4.8 s per document to enrich, and
+about 0.4 s to classify (classification only sees the title, summary and
+tags).
+
 ## Hardware notes
 
 Measured on the development machine (RTX 4060 8 GB, i7-14700K, 128 GB RAM):
@@ -121,7 +155,7 @@ These are the choices that decide whether answers are trustworthy:
 - [x] **P1 — Ingest.** Loaders (PDF, DOCX, PPTX, EPUB, HTML, Markdown,
       text), structure-aware chunking, SQLite catalog, content-addressed
       blob store, incremental `ingest` command.
-- [ ] **P2 — Enrichment.** Summaries, tags, entities, hypothetical questions,
+- [x] **P2 — Enrichment.** Summaries, tags, entities, hypothetical questions,
       taxonomy bootstrap and classification.
 - [ ] **P3 — Retrieval.** Qdrant collections, hybrid search, reranking,
       `rag_search` tool.

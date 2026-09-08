@@ -285,14 +285,20 @@ class LocalLLM:
         max_tokens: int | None = None,
         model: str | None = None,
         keep_alive: str | None = None,
+        json_schema: dict[str, Any] | None = None,
     ) -> ModelT:
         """Chat with a constrained JSON schema, validated into ``schema``.
 
         A small model will occasionally emit JSON that parses but does not
         validate. One repair round-trip showing it the validation error is far
         cheaper than discarding the document, so we do exactly one.
+
+        ``json_schema`` overrides the schema pushed down to the model while
+        still validating into ``schema``. That allows constraints Pydantic
+        cannot express statically, such as restricting a field to the category
+        paths of a taxonomy loaded at runtime.
         """
-        json_schema = schema.model_json_schema()
+        json_schema = json_schema if json_schema is not None else schema.model_json_schema()
         attempt_messages = _as_messages(messages)
 
         for attempt in range(2):
