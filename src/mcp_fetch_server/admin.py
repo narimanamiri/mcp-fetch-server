@@ -253,7 +253,12 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
   <div id="toast"></div>
   <script>
     const API = "/admin/api";
+    let authRequired = false;
+
     function getToken() { return sessionStorage.getItem("admin_token") || ""; }
+    function showAuthBar() {
+      document.getElementById("auth-bar").style.display = "flex";
+    }
     function saveToken() {
       sessionStorage.setItem("admin_token", document.getElementById("token").value.trim());
       toast("Token saved");
@@ -267,7 +272,12 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
     }
     async function api(path, opts = {}) {
       const res = await fetch(API + path, { ...opts, headers: { ...headers(), ...(opts.headers || {}) } });
-      if (res.status === 401) throw new Error("Unauthorized — set MCP_AUTH_TOKEN in the auth bar.");
+      if (res.status === 401) {
+        showAuthBar();
+        throw new Error(
+          "Unauthorized — paste your MCP_AUTH_TOKEN into the Bearer token field above, then click Save."
+        );
+      }
       if (!res.ok) {
         const body = await res.text();
         throw new Error(body || res.statusText);
@@ -296,9 +306,26 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
       const m = Math.floor((sec % 3600) / 60);
       return h + "h " + m + "m";
     }
+    async function loadPublicInfo() {
+      const res = await fetch(API + "/info");
+      if (!res.ok) throw new Error("Cannot reach admin API (" + res.status + ")");
+      const info = await res.json();
+      authRequired = !!info.auth_required;
+      document.getElementById("version").textContent = "v" + info.version;
+      if (authRequired) {
+        showAuthBar();
+        if (getToken()) document.getElementById("token").value = getToken();
+      }
+    }
+    function showLoginRequired() {
+      document.getElementById("status-badge").className = "badge badge-warn";
+      document.getElementById("status-badge").textContent = "Login required";
+      document.getElementById("stats").innerHTML =
+        '<div class="card"><div class="label">Authentication</div>' +
+        '<div class="value" style="font-size:1rem;">Enter MCP_AUTH_TOKEN above</div></div>';
+    }
     async function loadStatus() {
       const s = await api("/status");
-      document.getElementById("version").textContent = "v" + s.version;
       document.getElementById("auth-bar").style.display = s.auth_required ? "flex" : "none";
       if (s.auth_required && getToken()) document.getElementById("token").value = getToken();
       document.getElementById("stats").innerHTML = [
@@ -376,13 +403,23 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
     }
     async function refreshAll() {
       try {
+        await loadPublicInfo();
+        if (authRequired && !getToken()) {
+          showLoginRequired();
+          return;
+        }
         await Promise.all([loadStatus(), loadConfig(), loadTools(), loadHistory()]);
         document.getElementById("status-badge").className = "badge badge-ok";
         document.getElementById("status-badge").textContent = "Online";
       } catch (err) {
-        document.getElementById("status-badge").className = "badge badge-warn";
-        document.getElementById("status-badge").textContent = "Error";
-        toast(err.message);
+        const msg = String(err.message || err);
+        if (msg.includes("Unauthorized") || msg.includes("MCP_AUTH_TOKEN")) {
+          showLoginRequired();
+        } else {
+          document.getElementById("status-badge").className = "badge badge-warn";
+          document.getElementById("status-badge").textContent = "Error";
+        }
+        toast(msg);
       }
     }
     refreshAll();
@@ -415,10 +452,23 @@ class AdminPanel:
         return auth_header[7:].strip() == settings.mcp_auth_token
 
     def _unauthorized(self) -> JSONResponse:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return JSONResponse(
+            {"error": "unauthorized", "auth_required": bool(settings.mcp_auth_token)},
+            status_code=401,
+        )
 
     async def dashboard(self, request: Request) -> Response:
         return HTMLResponse(_DASHBOARD_HTML)
+
+    async def api_public_info(self, request: Request) -> Response:
+        """Public metadata so the dashboard can show the login form before auth."""
+        return JSONResponse(
+            {
+                "status": "ok",
+                "version": __version__,
+                "auth_required": bool(settings.mcp_auth_token),
+            }
+        )
 
     async def api_status(self, request: Request) -> Response:
         if not self._authorized(request):
@@ -511,6 +561,7 @@ class AdminPanel:
             routes=[
                 Route("/", self.root_redirect, methods=["GET"]),
                 Route("/admin", self.dashboard, methods=["GET"]),
+                Route("/admin/api/info", self.api_public_info, methods=["GET"]),
                 Route("/admin/api/status", self.api_status, methods=["GET"]),
                 Route("/admin/api/config", self.api_config, methods=["GET"]),
                 Route("/admin/api/tools", self.api_tools, methods=["GET"]),
@@ -528,6 +579,10 @@ class AdminPanel:
         @mcp.custom_route("/admin", methods=["GET"])
         async def _dashboard(request: Request) -> Response:
             return await self.dashboard(request)
+
+        @mcp.custom_route("/admin/api/info", methods=["GET"])
+        async def _info(request: Request) -> Response:
+            return await self.api_public_info(request)
 
         @mcp.custom_route("/admin/api/status", methods=["GET"])
         async def _status(request: Request) -> Response:

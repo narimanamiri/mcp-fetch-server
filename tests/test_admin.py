@@ -37,6 +37,39 @@ async def test_admin_dashboard_returns_html() -> None:
 
 
 @pytest.mark.asyncio
+async def test_admin_public_info_no_auth_required() -> None:
+    panel = AdminPanel(transport="streamable-http")
+    app = panel.create_app()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/admin/api/info")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["auth_required"] is False
+    assert "version" in data
+
+
+@pytest.mark.admin_auth
+@pytest.mark.asyncio
+async def test_admin_public_info_reports_auth_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MCP_AUTH_TOKEN", "secret-token")
+    from mcp_fetch_server.config import Settings
+
+    monkeypatch.setattr("mcp_fetch_server.admin.settings", Settings())
+
+    panel = AdminPanel(transport="streamable-http")
+    app = panel.create_app()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/admin/api/info")
+
+    assert response.status_code == 200
+    assert response.json()["auth_required"] is True
+
+
+@pytest.mark.asyncio
 async def test_admin_status_api() -> None:
     panel = AdminPanel(transport="stdio", started_at=time.time() - 120)
     app = panel.create_app()

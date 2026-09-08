@@ -416,6 +416,7 @@ Sandboxed write. Elicitation on overwrite. `destructiveHint: true`.
 | `/mcp` | POST/GET | Bearer | MCP Streamable HTTP |
 | `/health` | GET | None | `{"status":"ok","version":"0.1.0"}` |
 | `/admin` | GET | None (HTML) | Management dashboard |
+| `/admin/api/info` | GET | None | `{auth_required, version}` — public, for login UI |
 | `/admin/api/status` | GET | Bearer if token set | Uptime, counts, transport |
 | `/admin/api/config` | GET | Bearer if token set | Redacted settings |
 | `/admin/api/tools` | GET | Bearer if token set | Registered MCP tools |

@@ -680,6 +680,30 @@ Templates: `.env.example` (local) and `.env.docker.example` (Docker).
 
 ## 10. Troubleshooting
 
+### Admin dashboard shows "Error" or "Login required"
+
+Docker and HTTP mode set `MCP_AUTH_TOKEN` in `.env`. The admin API requires the same token.
+
+1. Open `http://HOST:8000/admin`
+2. You should see a **Bearer token** field at the top (after the fix) or enter token if already visible
+3. Paste the exact `MCP_AUTH_TOKEN` value from your `.env` file
+4. Click **Save**
+
+Verify the server is reachable:
+
+```bash
+curl http://192.168.20.63:8000/health
+curl -H "Authorization: Bearer YOUR_TOKEN" http://192.168.20.63:8000/admin/api/status
+```
+
+If `/health` fails, the container is not running or port 8000 is blocked by a firewall.
+
+After updating the server code, rebuild Docker:
+
+```bash
+docker compose up -d --build --force-recreate
+```
+
 ### Server does not appear in Cursor
 
 | Check | Action |
