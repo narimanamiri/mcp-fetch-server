@@ -40,6 +40,7 @@ mcp-fetch-server taxonomy bootstrap           # propose categories, then edit th
 mcp-fetch-server classify                     # file documents under them
 mcp-fetch-server embed                        # build the search index
 mcp-fetch-server search "your question"       # or --answer for a written answer
+mcp-fetch-server watch ./my-documents         # keep the corpus in step with a folder
 ```
 
 `mcp-fetch-server doctor` checks the whole stack before you start, and

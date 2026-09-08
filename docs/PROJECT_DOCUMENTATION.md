@@ -756,6 +756,7 @@ unchanged as a web fetch server; `register_corpus_tools` logs and returns.
 | `rag/site.py` | The archive rendered as a browsable website |
 | `rag/offline.py` | URL resolution against the corpus |
 | `rag/tools.py` | `rag_search`, `rag_answer`, `corpus_stats`, `corpus://` resources |
+| `rag/watch.py` | Folder watcher: incremental rescan, optional pruning |
 | `rag/evaluate.py` | Retrieval evaluation harness |
 | `rag/doctor.py` | Preflight checks |
 

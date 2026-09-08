@@ -256,6 +256,35 @@ This is a small sample on a small corpus and should not be read as a general
 verdict on reranking. It is a reason not to ship it on by default: measure it
 on your own corpus with `eval` before enabling it.
 
+## Watching a folder
+
+```bash
+mcp-fetch-server watch ./my-documents                # ingest + embed every 30s
+mcp-fetch-server watch ./my-documents --prune        # also drop deleted files
+mcp-fetch-server watch ./my-documents --once         # one pass and exit
+```
+
+Drop a file into the folder and it becomes searchable on the next scan.
+Ingestion is already incremental, so the watcher is a loop around the existing
+pipeline: an unchanged file costs a hash, and a missed tick is harmless
+because the next scan catches up.
+
+It polls rather than subscribing to filesystem events, on purpose. Events are
+unreliable across network shares and the Windows/WSL boundary, they arrive
+before a large file has finished being written, and debouncing them ends up
+re-implementing the hash check ingestion already does.
+
+Embedding runs by default, since a document in the catalog but not in the
+index is not findable. `--no-embed` skips it.
+
+Deletion is opt-in. Removing a file from disk is not obviously an instruction
+to drop it from the corpus, and it is not cheap to undo once the source is
+gone. With `--prune`, only documents whose source file sits **inside a watched
+root** are removed, so pointing the watcher at one folder can never prune
+documents ingested from elsewhere. Vectors are cleared before the catalog row:
+a vector with no catalog row behind it is a stale hit, whereas a catalog row
+with no vector is merely unsearchable.
+
 ## Hardware notes
 
 Measured on the development machine (RTX 4060 8 GB, i7-14700K, 128 GB RAM):
@@ -307,7 +336,8 @@ These are the choices that decide whether answers are trustworthy:
       backend, link graph; the fetch tools serve the corpus.
 - [x] **P5 — Accuracy.** Cross-encoder reranking, query expansion,
       small-to-big context, metadata filters, `rag_answer`.
-- [x] **P6 — Operations.** Evaluation harness, admin corpus tab, documentation.
+- [x] **P6 — Operations.** Evaluation harness, admin corpus tab, folder
+      watcher, documentation.
 
 ## Configuration
 

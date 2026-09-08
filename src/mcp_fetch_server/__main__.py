@@ -20,6 +20,7 @@ SUBCOMMANDS = {
     "embed",
     "search",
     "eval",
+    "watch",
 }
 
 
@@ -498,6 +499,66 @@ def _eval(argv: list[str]) -> int:
     return 0
 
 
+def _watch(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="mcp-fetch-server watch",
+        description="Keep the corpus in step with one or more folders",
+    )
+    parser.add_argument("paths", nargs="+", help="Folders (or files) to watch")
+    parser.add_argument(
+        "--interval", type=float, default=30.0, help="Seconds between scans (default 30)"
+    )
+    parser.add_argument(
+        "--no-embed",
+        action="store_true",
+        help="Ingest only. New documents will not be searchable until you run embed.",
+    )
+    parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="Remove documents whose source file has been deleted from a watched folder",
+    )
+    parser.add_argument("--once", action="store_true", help="Scan once and exit")
+    parser.add_argument("--quiet", action="store_true", help="Only print the final summary")
+    args = parser.parse_args(argv)
+
+    import asyncio
+
+    from mcp_fetch_server.rag.watch import WatchEvent, describe_targets, watch_paths
+
+    def report(event: WatchEvent) -> None:
+        if not args.quiet:
+            print(event.render(), flush=True)
+
+    if not args.quiet:
+        print(f"Watching {describe_targets(args.paths)}")
+        if not args.once:
+            print(f"Scanning every {max(2.0, args.interval):.0f}s. Press Ctrl+C to stop.")
+        if args.prune:
+            print("Pruning is on: deleting a file will remove it from the corpus.")
+        print()
+
+    try:
+        summary = asyncio.run(
+            watch_paths(
+                args.paths,
+                interval=args.interval,
+                embed=not args.no_embed,
+                prune=args.prune,
+                once=args.once,
+                on_event=report,
+            )
+        )
+    except KeyboardInterrupt:
+        # Stopping a watcher is the normal way to end it, not a failure.
+        print("\nStopped.")
+        return 0
+
+    print()
+    print(summary.render())
+    return 1 if summary.errors else 0
+
+
 def _force_utf8_output() -> None:
     """Make stdout/stderr UTF-8 safe.
 
@@ -540,6 +601,8 @@ def main(argv: list[str] | None = None) -> int:
         return _search(rest)
     if command == "eval":
         return _eval(rest)
+    if command == "watch":
+        return _watch(rest)
     return _serve(rest)
 
 
