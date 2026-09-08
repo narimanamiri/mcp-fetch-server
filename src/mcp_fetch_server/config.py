@@ -112,8 +112,12 @@ class Settings(BaseSettings):
     rag_top_k: int = Field(default=8, alias="FETCH_RAG_TOP_K")
     rag_candidates: int = Field(default=50, alias="FETCH_RAG_CANDIDATES")
     rag_rerank_enabled: bool = Field(default=True, alias="FETCH_RAG_RERANK_ENABLED")
+    # Multilingual by design: an English-only reranker would push every
+    # Persian passage down the list. Runs on CPU via ONNX, keeping the GPU
+    # free for the embedding and chat models.
     rag_reranker_model: str = Field(
-        default="BAAI/bge-reranker-v2-m3", alias="FETCH_RAG_RERANKER_MODEL"
+        default="jinaai/jina-reranker-v2-base-multilingual",
+        alias="FETCH_RAG_RERANKER_MODEL",
     )
 
     # Base URL minted for locally ingested documents, and the host that the

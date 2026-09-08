@@ -179,6 +179,40 @@ pointing at the homepage, and the network is never touched. Resolution happens
 strictly before the SSRF and robots checks, and does not relax them: the
 archive host is answered from SQLite and is never DNS-resolved.
 
+## Accuracy features
+
+```bash
+mcp-fetch-server search "your question" --expand --context 1
+mcp-fetch-server search "your question" --answer
+```
+
+**Cross-encoder reranking** runs last, over the fifty candidates retrieval
+narrowed to. Dense and sparse both score passages without ever comparing them
+to the query directly; a cross-encoder reads query and passage together. It
+runs on CPU through ONNX so the GPU stays free for the embedding and chat
+models, and measured at over 1000 passages/second it is not the bottleneck.
+Install with `uv sync --extra rerank`; without it retrieval returns the fused
+order, so a missing dependency costs quality rather than availability.
+
+The default reranker is `jinaai/jina-reranker-v2-base-multilingual`. An
+English-only model would push every Persian passage down the list.
+(`BAAI/bge-reranker-v2-m3`, named in the original plan, is not served by
+fastembed.)
+
+**Query expansion** (`--expand`) has the local model rewrite the question into
+a few phrasings, retrieves each, and fuses by reciprocal rank. A passage that
+several phrasings agree on rises. Costs one model call, so it is opt-in.
+
+**Small-to-big** (`--context N`) retrieves precise small chunks and returns
+them with their neighbours, so a passage is not missing the sentence that
+defines its subject.
+
+**`rag_answer`** writes an answer from the retrieved passages alone, with a
+`[n]` marker on each claim and the real source URLs appended by the server
+rather than the model. Markers pointing at passages that were not retrieved
+are stripped: a citation that does not resolve is worse than none, because it
+looks checked.
+
 ## Hardware notes
 
 Measured on the development machine (RTX 4060 8 GB, i7-14700K, 128 GB RAM):
@@ -228,8 +262,8 @@ These are the choices that decide whether answers are trustworthy:
       resources. Cross-encoder reranking moves to P5.
 - [x] **P4 — Simulated internet.** Site generator, URL resolver, local search
       backend, link graph; the fetch tools serve the corpus.
-- [ ] **P5 — Accuracy.** Small-to-big, query expansion, deduplication,
-      metadata filters, `rag_answer`.
+- [x] **P5 — Accuracy.** Cross-encoder reranking, query expansion,
+      small-to-big context, metadata filters, `rag_answer`.
 - [ ] **P6 — Operations.** Evaluation harness, admin corpus tab, watch-folder
       re-ingestion.
 

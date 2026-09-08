@@ -33,6 +33,12 @@ rag = [
     "pyyaml>=6.0",
 ]
 
+# Cross-encoder reranking. Separate from `rag` because it pulls onnxruntime,
+# which is large; retrieval works without it, just less precisely.
+rerank = [
+    "fastembed>=0.5",
+]
+
 [project.scripts]
 mcp-fetch-server = "mcp_fetch_server:main"
 

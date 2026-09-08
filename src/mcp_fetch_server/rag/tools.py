@@ -52,6 +52,8 @@ def register_rag_tools(mcp: FastMCP) -> None:
         categories: str = "",
         languages: str = "",
         doctypes: str = "",
+        expand_query: bool = False,
+        context_window: int = 0,
     ) -> str:
         """Search the local corpus for passages relevant to a query."""
         retriever = Retriever()
@@ -62,6 +64,8 @@ def register_rag_tools(mcp: FastMCP) -> None:
                 categories=_split_csv(categories),
                 languages=_split_csv(languages),
                 doctypes=_split_csv(doctypes),
+                expand=expand_query,
+                context_window=max(0, min(context_window, 3)),
             )
         except LLMUnavailableError as exc:
             raise ToolError(
@@ -81,6 +85,45 @@ def register_rag_tools(mcp: FastMCP) -> None:
             retriever.close()
 
         return result.render()
+
+    @mcp.tool(
+        annotations=read_only,
+        description=(
+            "Answer a question from the local document corpus, using only what the "
+            "corpus contains. Returns a written answer with numbered citations and "
+            "the source URL behind each one, or says plainly that the corpus does "
+            "not cover the question. Prefer rag_search when you want to read the "
+            "passages yourself."
+        ),
+    )
+    async def rag_answer(
+        question: str,
+        top_k: int = 6,
+        expand_query: bool = True,
+    ) -> str:
+        """Answer a question from the corpus, with citations."""
+        from mcp_fetch_server.rag.answer import answer_question
+
+        try:
+            answer = await answer_question(
+                question,
+                top_k=max(1, min(top_k, 20)),
+                expand=expand_query,
+            )
+        except LLMUnavailableError as exc:
+            raise ToolError(f"The local model is unreachable: {exc}") from exc
+        except LLMError as exc:
+            raise ToolError(str(exc)) from exc
+        except StoreError as exc:
+            raise ToolError(
+                f"The corpus index is unavailable: {exc}. "
+                "It may not have been built yet: run `mcp-fetch-server embed`."
+            ) from exc
+        except Exception as exc:
+            logger.exception("Unexpected rag_answer failure")
+            raise ToolError(f"Answering from the corpus failed: {exc}") from exc
+
+        return answer.render()
 
     @mcp.tool(
         annotations=read_only,

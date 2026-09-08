@@ -65,7 +65,7 @@ async def test_corpus_tools_are_registered():
     """The offline-corpus tools must appear alongside the web tools."""
     mcp = create_mcp_server()
     names = {tool.name for tool in await mcp.list_tools()}
-    assert {"rag_search", "corpus_stats"} <= names
+    assert {"rag_search", "rag_answer", "corpus_stats"} <= names
 
     templates = {template.uriTemplate for template in await mcp.list_resource_templates()}
     assert "corpus://doc/{doc_id}" in templates

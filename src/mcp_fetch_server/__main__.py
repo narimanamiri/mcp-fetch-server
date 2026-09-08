@@ -362,6 +362,15 @@ def _search(argv: list[str]) -> int:
     )
     parser.add_argument("query", help="What to look for")
     parser.add_argument("-k", "--top-k", type=int, default=None, help="Passages to return")
+    parser.add_argument(
+        "--expand", action="store_true", help="Rewrite the query into variants first"
+    )
+    parser.add_argument(
+        "--context", type=int, default=0, help="Include N neighbouring chunks around each hit"
+    )
+    parser.add_argument(
+        "--answer", action="store_true", help="Write an answer with citations instead of passages"
+    )
     parser.add_argument("--category", action="append", default=None, help="Filter by category")
     parser.add_argument("--language", action="append", default=None, help="Filter by language")
     parser.add_argument("--json", action="store_true", help="Emit results as JSON")
@@ -377,11 +386,23 @@ def _search(argv: list[str]) -> int:
     async def run() -> object:
         retriever = Retriever()
         try:
+            if args.answer:
+                from mcp_fetch_server.rag.answer import answer_question
+
+                return await answer_question(
+                    args.query,
+                    retriever=retriever,
+                    top_k=args.top_k or 6,
+                    expand=args.expand,
+                    context_window=args.context or 1,
+                )
             return await retriever.search(
                 args.query,
                 top_k=args.top_k,
                 categories=args.category,
                 languages=args.language,
+                expand=args.expand,
+                context_window=args.context,
             )
         finally:
             retriever.close()
@@ -396,7 +417,7 @@ def _search(argv: list[str]) -> int:
         print(json.dumps(result.as_dict(), indent=2, ensure_ascii=False))
     else:
         print(result.render())
-    return 0 if result else 1
+    return 0 if (args.answer or result) else 1
 
 
 def _force_utf8_output() -> None:

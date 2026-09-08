@@ -32,6 +32,7 @@ class RetrievalResult:
     query: str = ""
     candidates: int = 0
     reranked: bool = False
+    queries: list[str] = field(default_factory=list)
 
     def __len__(self) -> int:
         return len(self.hits)
@@ -42,6 +43,7 @@ class RetrievalResult:
     def as_dict(self) -> dict[str, Any]:
         return {
             "query": self.query,
+            "queries": self.queries or [self.query],
             "candidates": self.candidates,
             "reranked": self.reranked,
             "results": [
@@ -110,6 +112,37 @@ def deduplicate_by_document(hits: Sequence[SearchHit], *, per_document: int) -> 
     return kept
 
 
+def expand_context(
+    hits: Sequence[SearchHit], catalog: Catalog, *, window: int = 1
+) -> list[SearchHit]:
+    """Widen each passage with its neighbouring chunks (small-to-big).
+
+    Small chunks retrieve precisely, because their embedding is not diluted by
+    unrelated text. But a small chunk read on its own can be missing the
+    sentence that defines its subject. Retrieving small and returning the
+    surrounding window gets the precision of one and the readability of the
+    other.
+    """
+    if window <= 0:
+        return list(hits)
+
+    widened: list[SearchHit] = []
+    for hit in hits:
+        neighbours = catalog.neighbour_chunks(hit.doc_id, hit.chunk_index, window=window)
+        if len(neighbours) <= 1:
+            widened.append(hit)
+            continue
+        hit.text = "\n\n".join(chunk.text for chunk in neighbours)
+        pages = [chunk.page_start for chunk in neighbours if chunk.page_start is not None]
+        if pages:
+            hit.page_start = min(pages)
+        ends = [chunk.page_end for chunk in neighbours if chunk.page_end is not None]
+        if ends:
+            hit.page_end = max(ends)
+        widened.append(hit)
+    return widened
+
+
 def hydrate(hits: Sequence[SearchHit], catalog: Catalog) -> list[SearchHit]:
     """Attach chunk text from the catalog in one batched lookup."""
     if not hits:
@@ -171,6 +204,22 @@ class Retriever:
             self._catalog.close()
             self._catalog = None
 
+    async def _search_one(
+        self,
+        query: str,
+        *,
+        pool: int,
+        query_filter: object,
+    ) -> list[SearchHit]:
+        dense_vectors = await self.llm.embed([query])
+        dense = dense_vectors[0] if dense_vectors else None
+        # Stop words are kept on the query side: a short query is mostly
+        # content words already, and dropping them can empty the vector.
+        sparse = encode(query, remove_stopwords=False)
+        return self.store.search(
+            dense=dense, sparse=sparse, limit=pool, query_filter=query_filter
+        )
+
     async def search(
         self,
         query: str,
@@ -182,6 +231,9 @@ class Retriever:
         languages: Sequence[str] | None = None,
         doctypes: Sequence[str] | None = None,
         doc_ids: Sequence[str] | None = None,
+        expand: bool = False,
+        rerank: bool | None = None,
+        context_window: int = 0,
     ) -> RetrievalResult:
         cleaned = query.strip()
         if not cleaned:
@@ -191,12 +243,6 @@ class Retriever:
         pool = candidates or settings.rag_candidates
         pool = max(pool, limit)
 
-        dense_vectors = await self.llm.embed([cleaned])
-        dense = dense_vectors[0] if dense_vectors else None
-        # Stop words are kept on the query side: a short query is mostly
-        # content words already, and dropping them can empty the vector.
-        sparse = encode(cleaned, remove_stopwords=False)
-
         query_filter = build_filter(
             doc_ids=doc_ids,
             categories=categories,
@@ -204,12 +250,41 @@ class Retriever:
             doctypes=doctypes,
         )
 
-        hits = self.store.search(
-            dense=dense, sparse=sparse, limit=pool, query_filter=query_filter
-        )
-        result = RetrievalResult(query=cleaned, candidates=len(hits))
+        queries = [cleaned]
+        if expand:
+            from mcp_fetch_server.rag.expand import expand_query
+
+            queries = await expand_query(cleaned, llm=self.llm, languages=languages)
+
+        if len(queries) == 1:
+            hits = await self._search_one(queries[0], pool=pool, query_filter=query_filter)
+        else:
+            from mcp_fetch_server.rag.expand import fuse_by_rank
+
+            lists = [
+                await self._search_one(variant, pool=pool, query_filter=query_filter)
+                for variant in queries
+            ]
+            hits = fuse_by_rank(lists)
+
+        result = RetrievalResult(query=cleaned, candidates=len(hits), queries=queries)
 
         hits = hydrate(hits, self.catalog)
+
+        # Rerank before the per-document cap, so the cap keeps the passages a
+        # cross-encoder judged best rather than whichever ones fusion put on
+        # top.
+        should_rerank = settings.rag_rerank_enabled if rerank is None else rerank
+        if should_rerank and hits:
+            from mcp_fetch_server.rag.rerank import maybe_rerank
+
+            hits, result.reranked = await maybe_rerank(cleaned, hits)
+
         hits = deduplicate_by_document(hits, per_document=per_document)
-        result.hits = hits[:limit]
+        hits = hits[:limit]
+
+        if context_window > 0:
+            hits = expand_context(hits, self.catalog, window=context_window)
+
+        result.hits = hits
         return result
