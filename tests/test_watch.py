@@ -290,3 +290,29 @@ def test_cli_watch_handles_interrupt_as_a_normal_exit(folder, tmp_path, monkeypa
     monkeypatch.setattr("mcp_fetch_server.rag.watch.watch_paths", interrupted)
     assert cli_main(["watch", str(folder), "--no-embed"]) == 0
     assert "Stopped." in capsys.readouterr().out
+
+
+def test_cli_watch_fails_fast_on_a_missing_folder(tmp_path, monkeypatch, capsys):
+    """A watcher pointed at a folder that does not exist used to sit there
+    reporting successful empty scans forever. Under systemd that looked like a
+    healthy service doing nothing."""
+    monkeypatch.setattr(settings, "corpus_data_dir", str(tmp_path / "data"))
+    assert cli_main(["watch", str(tmp_path / "absent"), "--once", "--no-embed"]) == 1
+
+    captured = capsys.readouterr().err
+    assert "no such path" in captured
+    # The WSL case is the one that actually bites: arguments are not translated.
+    assert "wslpath" in captured
+
+
+def test_cli_watch_reports_every_missing_folder(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(settings, "corpus_data_dir", str(tmp_path / "data"))
+    real = tmp_path / "real"
+    real.mkdir()
+    assert (
+        cli_main(
+            ["watch", str(real), str(tmp_path / "gone"), "--once", "--no-embed"]
+        )
+        == 1
+    )
+    assert "gone" in capsys.readouterr().err

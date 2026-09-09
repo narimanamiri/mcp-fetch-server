@@ -41,6 +41,7 @@ mcp-fetch-server classify                     # file documents under them
 mcp-fetch-server embed                        # build the search index
 mcp-fetch-server search "your question"       # or --answer for a written answer
 mcp-fetch-server watch ./my-documents         # keep the corpus in step with a folder
+./scripts/install-watch-unit.sh               # ...or run that as a systemd unit (WSL)
 ```
 
 `mcp-fetch-server doctor` checks the whole stack before you start, and

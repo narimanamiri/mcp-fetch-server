@@ -20,3 +20,7 @@ workspace/*
 dist/
 build/
 *.spec.bak
+
+# Corpus source folder watched by the systemd unit (keep dir, ignore contents)
+corpus/*
+!corpus/.gitkeep

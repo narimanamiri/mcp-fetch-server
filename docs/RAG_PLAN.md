@@ -285,6 +285,46 @@ documents ingested from elsewhere. Vectors are cleared before the catalog row:
 a vector with no catalog row behind it is a stale hit, whereas a catalog row
 with no vector is merely unsearchable.
 
+### Running it as a service (WSL + systemd)
+
+```bash
+# from inside WSL
+./scripts/install-watch-unit.sh [WATCHED_FOLDER]
+```
+
+Installs a systemd **user** unit, so no root is needed, and enables lingering
+so it starts with the WSL distro rather than waiting for a login shell.
+Settings live in `~/.config/mcp-corpus-watch.env` (folder, interval, extra
+flags); edit and `systemctl --user restart mcp-corpus-watch.service`.
+
+The unit supervises the **Windows** console script through WSL interop rather
+than a Linux copy of the project. That is deliberate: the catalog is SQLite,
+the MCP server that reads it runs on Windows, and SQLite accessed concurrently
+by a Windows process and a Linux process over drvfs has no shared lock
+manager. Keeping every writer on the Windows side avoids that entirely, and
+costs nothing, since systemd is only supervising.
+
+Two WSL details that are easy to get wrong, both handled by the installer:
+
+- Interop translates a process's **working directory** into its Windows
+  equivalent, but **not** its command-line arguments. Passing `/mnt/e/...` to
+  the Windows executable makes it look for a literal `\mnt\e\...`, and the
+  watcher then scans nothing while reporting healthy empty passes. A wrapper
+  converts the path with `wslpath -w` at start.
+- `systemd` splits `ExecStart=` and `Environment=` on whitespace, so paths
+  containing spaces must be quoted.
+
+Logs go to the journal:
+
+```bash
+journalctl --user -u mcp-corpus-watch.service -f
+```
+
+If Qdrant is not up yet when the distro boots, embedding fails for that scan,
+is logged, and is retried on the next one, since a document is only marked
+embedded once it succeeds. Observed in practice: two failed scans while Docker
+started, then indexed on the third with no intervention.
+
 ## Hardware notes
 
 Measured on the development machine (RTX 4060 8 GB, i7-14700K, 128 GB RAM):

@@ -1,0 +1,6 @@
+# Shell scripts and systemd units must keep LF endings. With core.autocrlf=true
+# on Windows they would otherwise be checked out with CRLF, and bash rejects
+# a shebang line ending in \r ("bad interpreter").
+*.sh        text eol=lf
+*.service   text eol=lf
+*.timer     text eol=lf

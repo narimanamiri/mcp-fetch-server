@@ -523,8 +523,23 @@ def _watch(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     import asyncio
+    from pathlib import Path
 
     from mcp_fetch_server.rag.watch import WatchEvent, describe_targets, watch_paths
+
+    # A watcher pointed at a folder that does not exist would otherwise sit
+    # there reporting successful empty scans forever.
+    missing = [target for target in args.paths if not Path(target).expanduser().exists()]
+    if missing:
+        for target in missing:
+            print(f"Error: no such path: {target}", file=sys.stderr)
+        print(
+            "Create the folder, or pass one that exists. Running inside WSL, note "
+            "that paths are handed to the Windows executable unchanged: use a "
+            r"Windows path such as E:\corpus, or convert with `wslpath -w`.",
+            file=sys.stderr,
+        )
+        return 1
 
     def report(event: WatchEvent) -> None:
         if not args.quiet:
