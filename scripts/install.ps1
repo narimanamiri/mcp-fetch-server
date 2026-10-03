@@ -138,6 +138,29 @@ if (Test-Path (Join-Path $projectDir "pyproject.toml")) {
 Set-Location $projectDir
 $projectDir = (Get-Location).Path
 
+# Windows truncates at MAX_PATH (260) unless long paths are enabled, and some
+# dependencies ship deeply nested data files. jsonschema_specifications alone
+# needs about 100 characters past the project root, so a deep install folder
+# produces a venv that imports and then fails with FileNotFoundError on a file
+# that is plainly there -- confusing enough to be worth catching up front.
+$longPaths = 0
+try {
+    $longPaths = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+        -Name LongPathsEnabled -ErrorAction Stop).LongPathsEnabled
+} catch { }
+
+if ($longPaths -ne 1 -and $projectDir.Length -gt 130) {
+    Write-Warn "the install path is $($projectDir.Length) characters, which is long for Windows."
+    Write-Info "Some packages nest data files ~100 characters deeper, so they may fail to"
+    Write-Info "load even though they installed. Either install somewhere shorter, such as"
+    Write-Info "C:\mcp-fetch-server, or enable long paths (as administrator):"
+    Write-Info '  New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `'
+    Write-Info '    -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force'
+    if (-not (Confirm-Action "Continue anyway?")) {
+        Stop-WithError "stopped. Re-run with --dir pointing somewhere shorter."
+    }
+}
+
 # ------------------------------------------------------- 2. uv
 
 Write-Step "Checking for uv"
