@@ -71,6 +71,31 @@ See [docs/RAG_PLAN.md](docs/RAG_PLAN.md) for the full picture.
 
 ## Quick Start
 
+### One-command install (any platform)
+
+```bash
+# Linux / macOS / WSL
+curl -fsSL https://raw.githubusercontent.com/narimanamiri/mcp-fetch-server/master/scripts/install.sh -o install.sh
+bash install.sh --yes
+```
+
+```powershell
+# Windows
+irm https://raw.githubusercontent.com/narimanamiri/mcp-fetch-server/master/scripts/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1 -Yes
+```
+
+Clones the project if it is not already present, installs `uv` and the
+dependencies, writes a `.env` with a freshly generated `MCP_AUTH_TOKEN`,
+checks Ollama and pulls the models, brings up Qdrant (or picks embedded mode
+when Docker is absent), and runs `doctor` to verify. Re-running never
+overwrites an existing `.env`.
+
+Useful flags (`--help` for all): `--mode offline`, `--qdrant embedded`,
+`--no-models`, `--rerank`, `--corpus PATH`, `--watch`.
+
+
+
 ### Option A: Docker — full stack (recommended for server deployment)
 
 Runs the MCP server, admin GUI, and SearXNG together.
