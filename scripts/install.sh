@@ -172,6 +172,15 @@ fi
 cd "${PROJECT_DIR}"
 PROJECT_DIR="$(pwd)"
 
+# Check the checkout is complete now rather than tripping over a missing file
+# several steps later, where the error points at the wrong thing. An
+# interrupted clone, a full disk, or a partial copy all land here.
+for required in pyproject.toml .env.example src/mcp_fetch_server/__init__.py; do
+  [ -e "${required}" ] || die "the checkout at ${PROJECT_DIR} is incomplete: ${required} is missing.
+Delete that directory and re-run, or clone it again:
+    git clone ${REPO_URL}"
+done
+
 # ---------------------------------------------------------------- 2. uv
 
 step "Checking for uv"

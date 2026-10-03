@@ -138,6 +138,19 @@ if (Test-Path (Join-Path $projectDir "pyproject.toml")) {
 Set-Location $projectDir
 $projectDir = (Get-Location).Path
 
+# Check the checkout is complete now rather than tripping over a missing file
+# several steps later, where the error points at the wrong thing. An
+# interrupted clone, a full disk, or a partial copy all land here.
+foreach ($required in @("pyproject.toml", ".env.example", "src\mcp_fetch_server\__init__.py")) {
+    if (-not (Test-Path $required)) {
+        Stop-WithError @"
+the checkout at $projectDir is incomplete: $required is missing.
+Delete that directory and re-run, or clone it again:
+    git clone $RepoUrl
+"@
+    }
+}
+
 # Windows truncates at MAX_PATH (260) unless long paths are enabled, and some
 # dependencies ship deeply nested data files. jsonschema_specifications alone
 # needs about 100 characters past the project root, so a deep install folder
