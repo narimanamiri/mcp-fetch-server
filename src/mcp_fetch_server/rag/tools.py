@@ -18,6 +18,7 @@ from mcp.types import ToolAnnotations
 from mcp_fetch_server.config import settings
 from mcp_fetch_server.rag.catalog import Catalog
 from mcp_fetch_server.rag.llm import LLMError, LLMUnavailableError
+from mcp_fetch_server.rag.prompts import register_rag_prompts
 from mcp_fetch_server.rag.retrieve import Retriever
 from mcp_fetch_server.rag.store import StoreError, VectorStore
 from mcp_fetch_server.rag.taxonomy import Taxonomy
@@ -35,6 +36,8 @@ def _split_csv(value: str | None) -> list[str] | None:
 
 def register_rag_tools(mcp: FastMCP) -> None:
     read_only = ToolAnnotations(readOnlyHint=True)
+
+    register_rag_prompts(mcp)
 
     @mcp.tool(
         annotations=read_only,
@@ -124,6 +127,47 @@ def register_rag_tools(mcp: FastMCP) -> None:
             raise ToolError(f"Answering from the corpus failed: {exc}") from exc
 
         return answer.render()
+
+    @mcp.tool(
+        annotations=read_only,
+        description=(
+            "Diagnose a corpus search: show what each retrieval arm returned on its "
+            "own (semantic vs exact-term), the fused order, the effect of reranking, "
+            "and which query terms reached the index. Use this when a search returns "
+            "the wrong passages and you need to know why, not to retrieve answers."
+        ),
+    )
+    async def rag_explain(
+        query: str,
+        top_k: int = 5,
+        categories: str = "",
+        languages: str = "",
+    ) -> str:
+        """Explain how a corpus search produced its ranking."""
+        retriever = Retriever()
+        try:
+            trace = await retriever.explain(
+                query,
+                top_k=max(1, min(top_k, 20)),
+                categories=_split_csv(categories),
+                languages=_split_csv(languages),
+            )
+        except LLMUnavailableError as exc:
+            raise ToolError(f"The local embedding model is unreachable: {exc}") from exc
+        except LLMError as exc:
+            raise ToolError(f"Embedding the query failed: {exc}") from exc
+        except StoreError as exc:
+            raise ToolError(
+                f"The corpus index is unavailable: {exc}. "
+                "It may not have been built yet: run `mcp-fetch-server embed`."
+            ) from exc
+        except Exception as exc:
+            logger.exception("Unexpected rag_explain failure")
+            raise ToolError(f"Explaining the search failed: {exc}") from exc
+        finally:
+            retriever.close()
+
+        return trace.render()
 
     @mcp.tool(
         annotations=read_only,
@@ -223,6 +267,47 @@ def register_rag_tools(mcp: FastMCP) -> None:
             indent=2,
             ensure_ascii=False,
         )
+
+    @mcp.resource(
+        "corpus://chunk/{chunk_id}",
+        name="corpus-chunk",
+        title="Corpus passage",
+        description=(
+            "One retrievable passage by chunk id, with its heading path, page range "
+            "and character span in the parent document. Chunk ids appear in "
+            "rag_explain output and look like '<doc_id>:<index>'."
+        ),
+        mime_type="application/json",
+    )
+    def read_corpus_chunk(chunk_id: str) -> str:
+        try:
+            with Catalog() as catalog:
+                chunk = catalog.get_chunk(chunk_id)
+                if chunk is None:
+                    return json.dumps(
+                        {"error": f"no chunk with id {chunk_id}"}, indent=2
+                    )
+                record = catalog.get_document(chunk.doc_id)
+                return json.dumps(
+                    {
+                        "chunk_id": chunk.chunk_id,
+                        "doc_id": chunk.doc_id,
+                        "chunk_index": chunk.chunk_index,
+                        "heading_path": chunk.heading_path,
+                        "pages": [chunk.page_start, chunk.page_end],
+                        "char_span": [chunk.char_start, chunk.char_end],
+                        "token_estimate": chunk.token_estimate,
+                        "document": {
+                            "title": record.title if record else None,
+                            "url": record.url if record else None,
+                        },
+                        "text": chunk.text,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+        except Exception as exc:
+            return json.dumps({"error": str(exc)}, indent=2)
 
     @mcp.resource(
         "corpus://doc/{doc_id}",

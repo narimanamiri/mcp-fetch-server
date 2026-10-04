@@ -325,6 +325,52 @@ is logged, and is retried on the next one, since a document is only marked
 embedded once it succeeds. Observed in practice: two failed scans while Docker
 started, then indexed on the third with no intervention.
 
+## The corpus as an MCP surface
+
+The corpus is reachable without a shell. Tools:
+
+| Tool | Purpose |
+|---|---|
+| `rag_search` | Ranked passages with citable URLs; filters by category, language, doctype |
+| `rag_answer` | An answer from the passages alone, with verified citations |
+| `rag_explain` | Why a search ranked the way it did |
+| `corpus_stats` | What the archive holds, before asking it anything |
+
+Resources: `corpus://stats`, `corpus://taxonomy`, `corpus://doc/{doc_id}`,
+`corpus://chunk/{chunk_id}`.
+
+Prompts, so a client does not have to work out the tool order for itself:
+`explore_archive`, `research_corpus`, `cite_claim`, `compare_documents`,
+`summarize_category`. Each one states that corpus content is untrusted data,
+because a document in the archive can carry an injected instruction exactly as
+a web page can.
+
+### Diagnosing a bad search
+
+```bash
+# through MCP
+rag_explain(query="chunk overlap")
+```
+
+Normal search fuses the two arms and returns one list, which is what a caller
+wants and useless for working out *why* a passage placed where it did.
+`rag_explain` runs dense and sparse separately as well as fused, so a miss can
+be attributed:
+
+- absent from **both** arms — a coverage problem, the corpus does not hold it
+- in **sparse but not dense** — a vocabulary mismatch
+- in **both but ranked low** — a fusion or reranking problem
+
+It also reports which query terms reached the lexical index and which the stop
+word list discarded, since a query made entirely of stop words has an empty
+sparse vector. Three queries instead of one, so it is a diagnostic rather than
+a search path.
+
+Worked example on a mixed-language corpus, query `bge-m3`: the dense arm ranks
+a Persian document first on meaning, the sparse arm ranks an English one first
+on the exact token (IDF weight 4.65), and fusion reconciles them. Seeing the
+two arms disagree is the whole point.
+
 ## Hardware notes
 
 Measured on the development machine (RTX 4060 8 GB, i7-14700K, 128 GB RAM):

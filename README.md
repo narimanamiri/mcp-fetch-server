@@ -28,7 +28,9 @@ an offline archive a local model can browse as if it were the internet.
 
 - `rag_search` — hybrid semantic + exact-term search over your documents, with citable URLs
 - `rag_answer` — an answer written from your documents alone, with numbered citations
+- `rag_explain` — why a search ranked the way it did, arm by arm
 - `corpus_stats` — what the archive contains
+- Prompts: `explore_archive`, `research_corpus`, `cite_claim`, `compare_documents`, `summarize_category`
 - `fetch_url`, `web_search`, `extract_links` transparently serve the archive when `FETCH_NET_MODE` is `offline` or `hybrid`
 
 ```bash
