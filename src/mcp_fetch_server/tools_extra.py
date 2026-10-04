@@ -10,6 +10,7 @@ sampling, roots) that do require a real request context.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from urllib.parse import urlparse
@@ -43,6 +44,8 @@ from mcp_fetch_server.files import (
     write_text_file,
 )
 from mcp_fetch_server.security import SecurityError
+
+logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[int, int], Awaitable[None]]
 
@@ -240,10 +243,17 @@ def register_extra_tools(mcp: FastMCP) -> None:
         ctx: Context | None = None,
     ) -> str:
         async def _on_progress(done: int, total: int) -> None:
-            if ctx is not None:
+            # FastMCP supplies a Context even outside a request, where
+            # report_progress raises. Progress is cosmetic, so it must not be
+            # able to fail the fetches it is describing.
+            if ctx is None:
+                return
+            try:
                 await ctx.report_progress(
                     progress=done, total=total, message=f"Fetched {done}/{total}"
                 )
+            except Exception:
+                logger.debug("Progress reporting unavailable", exc_info=True)
 
         return await run_batch_fetch(
             urls,

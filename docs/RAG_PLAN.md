@@ -336,6 +336,26 @@ The corpus is reachable without a shell. Tools:
 | `rag_explain` | Why a search ranked the way it did |
 | `corpus_stats` | What the archive holds, before asking it anything |
 
+Management, so a client can curate without a shell:
+
+| Tool | Purpose |
+|---|---|
+| `corpus_ingest` | Add documents from an allowed folder and index them |
+| `corpus_reindex` | Index anything catalogued but not yet searchable |
+| `corpus_classify` | File unclassified documents under the existing taxonomy |
+
+These are additive only. `corpus_ingest` reads the filesystem, so it reuses
+the **same sandbox as `read_file`** — `FETCH_LOCAL_FILES_ROOT` plus any
+client-exposed roots — rather than introducing an unsandboxed arbitrary-read
+path into a server that deliberately confines file access. That sandbox is off
+by default, and ingestion is not a way around it.
+
+Destructive operations stay on the command line, where they already have their
+own confirmations: dropping the collection (`embed --recreate`), pruning
+deleted documents (`watch --prune`) and re-proposing the taxonomy
+(`taxonomy bootstrap`). A tool call is the wrong place to discard a corpus,
+and re-proposing categories orphans every classification already made.
+
 Resources: `corpus://stats`, `corpus://taxonomy`, `corpus://doc/{doc_id}`,
 `corpus://chunk/{chunk_id}`.
 

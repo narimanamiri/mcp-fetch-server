@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
@@ -24,6 +24,24 @@ from mcp_fetch_server.rag.store import StoreError, VectorStore
 from mcp_fetch_server.rag.taxonomy import Taxonomy
 
 logger = logging.getLogger(__name__)
+
+
+async def _report(
+    ctx: Context | None, progress: int, total: int, message: str
+) -> None:
+    """Report progress if a request is listening, and never fail if not.
+
+    FastMCP supplies a Context object even outside a request, so a null check
+    is not enough: report_progress then raises "Context is not available
+    outside of a request" and takes the whole operation with it. Progress is
+    cosmetic, so it must not be able to fail the work it is describing.
+    """
+    if ctx is None:
+        return
+    try:
+        await ctx.report_progress(progress=progress, total=total, message=message)
+    except Exception:
+        logger.debug("Progress reporting unavailable", exc_info=True)
 
 
 def _split_csv(value: str | None) -> list[str] | None:
@@ -267,6 +285,162 @@ def register_rag_tools(mcp: FastMCP) -> None:
             indent=2,
             ensure_ascii=False,
         )
+
+    # ------------------------------------------------------------------
+    # Corpus management
+    #
+    # Additive operations only. Ingesting reads the filesystem, so it reuses
+    # the same sandbox as read_file rather than introducing an unsandboxed
+    # arbitrary-read path into a server that deliberately confines file
+    # access. Destructive operations -- dropping the collection, pruning
+    # deleted documents, re-proposing the taxonomy -- stay on the CLI, where
+    # they already have their own confirmations; a tool call is the wrong
+    # place to discard a corpus.
+    # ------------------------------------------------------------------
+
+    mutates = ToolAnnotations(readOnlyHint=False, idempotentHint=True)
+
+    @mcp.tool(
+        annotations=mutates,
+        description=(
+            "Add documents to the local corpus from a folder, then index them so they "
+            "are searchable. The path must sit inside a directory this server is "
+            "allowed to read (FETCH_LOCAL_FILES_ROOT or a client-exposed root). "
+            "Unchanged files are skipped, so calling this repeatedly is cheap."
+        ),
+    )
+    async def corpus_ingest(
+        path: str,
+        limit: int = 50,
+        ctx: Context | None = None,
+    ) -> str:
+        """Ingest and index documents from an allowed local folder."""
+        from mcp_fetch_server.files import FileAccessError, resolve_path
+        from mcp_fetch_server.rag.embed import run_embedding
+        from mcp_fetch_server.rag.ingest import ingest_paths
+        from mcp_fetch_server.tools_extra import resolve_allowed_roots
+
+        roots = await resolve_allowed_roots(ctx)
+        try:
+            target = resolve_path(path, roots)
+        except FileAccessError as exc:
+            raise ToolError(
+                f"{exc}\nCorpus ingestion reads the filesystem, so it is restricted to "
+                "the same directories as read_file."
+            ) from exc
+
+        if not target.exists():
+            raise ToolError(f"No such path: {path}")
+
+        capped = max(1, min(limit, 500))
+        try:
+            with Catalog() as catalog, VectorStore() as store:
+                summary = await ingest_paths(
+                    [target], catalog=catalog, limit=capped
+                )
+                await _report(ctx, 1, 2, "parsed, now indexing")
+                embedded = await run_embedding(catalog=catalog, store=store)
+        except StoreError as exc:
+            raise ToolError(
+                f"Documents were catalogued but could not be indexed: {exc}"
+            ) from exc
+        except Exception as exc:
+            logger.exception("Unexpected corpus_ingest failure")
+            raise ToolError(f"Ingestion failed: {exc}") from exc
+
+        lines = [
+            f"Ingested {summary.ingested}, skipped {summary.skipped}, "
+            f"failed {summary.failed} ({summary.total_chunks} passages).",
+            f"Indexed {embedded.embedded} document(s), {embedded.total_chunks} passages.",
+        ]
+        if summary.failures:
+            lines.append("")
+            lines.append("Failures:")
+            lines.extend(
+                f"  {result.path.name}: {result.error}" for result in summary.failures[:10]
+            )
+        if len(summary.results) >= capped:
+            lines.append("")
+            lines.append(
+                f"Stopped at the {capped}-file limit. Call again to continue."
+            )
+        return "\n".join(lines)
+
+    @mcp.tool(
+        annotations=mutates,
+        description=(
+            "Index any corpus documents that are not yet searchable, for example after "
+            "documents were added outside this server. Does not re-index documents that "
+            "are already current, and never drops the existing index."
+        ),
+    )
+    async def corpus_reindex(ctx: Context | None = None) -> str:
+        """Embed documents that have been catalogued but not indexed."""
+        from mcp_fetch_server.rag.embed import run_embedding
+
+        try:
+            with Catalog() as catalog, VectorStore() as store:
+                if not catalog.stats()["documents"]:
+                    return (
+                        "The corpus is empty, so there is nothing to index. Add "
+                        "documents with corpus_ingest."
+                    )
+                summary = await run_embedding(catalog=catalog, store=store)
+        except (LLMUnavailableError, LLMError) as exc:
+            raise ToolError(f"The embedding model is unavailable: {exc}") from exc
+        except StoreError as exc:
+            raise ToolError(f"The index is unavailable: {exc}") from exc
+        except Exception as exc:
+            logger.exception("Unexpected corpus_reindex failure")
+            raise ToolError(f"Indexing failed: {exc}") from exc
+
+        if not summary.results:
+            return "Every document is already indexed."
+        return (
+            f"Indexed {summary.embedded}, failed {summary.failed} "
+            f"({summary.total_chunks} passages) in {summary.duration:.1f}s."
+        )
+
+    @mcp.tool(
+        annotations=mutates,
+        description=(
+            "File any unclassified corpus documents under the existing taxonomy, so "
+            "they can be filtered by category. Only assigns categories that already "
+            "exist; it never invents new ones."
+        ),
+    )
+    async def corpus_classify() -> str:
+        """Classify documents against the stored taxonomy."""
+        from mcp_fetch_server.rag.taxonomy import TaxonomyError, run_classification
+
+        taxonomy = Taxonomy.load()
+        if not taxonomy:
+            raise ToolError(
+                "There is no taxonomy yet, and proposing one is deliberately a "
+                "command-line step because it is reviewed by hand: run "
+                "`mcp-fetch-server taxonomy bootstrap`."
+            )
+
+        try:
+            with Catalog() as catalog:
+                summary = await run_classification(catalog=catalog, taxonomy=taxonomy)
+        except (TaxonomyError, LLMError) as exc:
+            raise ToolError(str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Unexpected corpus_classify failure")
+            raise ToolError(f"Classification failed: {exc}") from exc
+
+        if not summary.results:
+            return "Every enriched document is already classified."
+        lines = [
+            f"Classified {summary.classified}, uncategorised {summary.uncategorised}, "
+            f"failed {summary.failed}."
+        ]
+        counts = summary.counts_by_category()
+        if counts:
+            lines.append("")
+            lines.extend(f"  {path}: {count}" for path, count in counts.items())
+        return "\n".join(lines)
 
     @mcp.resource(
         "corpus://chunk/{chunk_id}",
