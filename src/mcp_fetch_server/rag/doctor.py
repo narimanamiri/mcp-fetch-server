@@ -99,13 +99,21 @@ async def check_llm(report: Report, *, llm: LocalLLM | None = None) -> None:
         name = health[key]
         if health[f"{key}_available"]:
             report.add(f"{role} model", "ok", name)
-        else:
-            report.add(
-                f"{role} model",
-                "fail",
-                f"{name} is not installed",
-                f"Install it with `ollama pull {name}`.",
+            continue
+
+        # Naming another tag of the same model is the difference between
+        # "pull 3 GB" and "change one setting".
+        alternatives = health.get(f"{key}_alternatives") or []
+        detail = f"{name} is not installed"
+        if alternatives:
+            detail += f" (found {', '.join(alternatives)})"
+            hint = (
+                f"Either `ollama pull {name}`, or point the config at one you have, "
+                f"e.g. {alternatives[0]}."
             )
+        else:
+            hint = f"Install it with `ollama pull {name}`."
+        report.add(f"{role} model", "fail", detail, hint)
 
     if health["embed_model_available"]:
         try:
@@ -189,6 +197,26 @@ def check_rag_extra(report: Report) -> None:
 def check_mode(report: Report) -> None:
     mode = settings.net_mode
     detail = f"net_mode={mode}, site={settings.site_base_url}"
+
+    # "Offline" is a promise about network behaviour, and the fetch and search
+    # paths keep it. The embedding call does not know about it: a remote
+    # model backend sends every query to a third party while the server still
+    # reports itself as air-gapped, which is worth saying out loud.
+    if mode == "offline" and settings.llm_backend == "openai":
+        host = settings.llm_base_url
+        if not any(
+            marker in host for marker in ("localhost", "127.0.0.1", "[::1]", "::1")
+        ):
+            report.add(
+                "corpus mode",
+                "warn",
+                f"{detail}, but the model backend is remote ({host})",
+                "Offline mode does not cover the embedding model: every query is "
+                "sent to that host. Point FETCH_LLM_BASE_URL at a local model to "
+                "make the air gap real.",
+            )
+            return
+
     if mode == "online":
         report.add(
             "corpus mode",

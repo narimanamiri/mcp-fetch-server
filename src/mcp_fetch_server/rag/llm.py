@@ -205,9 +205,32 @@ class LocalLLM:
             else:
                 available = [str(entry.get("id")) for entry in payload.get("data", [])]
 
+        def _tagged(name: str) -> str:
+            # Ollama treats a bare name as the :latest tag.
+            return name if ":" in name else f"{name}:latest"
+
+        installed = {_tagged(entry) for entry in available if entry}
+
         def _present(name: str) -> bool:
+            """Exact match only, tag included.
+
+            Matching on the base name alone reported gemma3:4b as installed
+            when only gemma3:12b was present. They are different models with
+            very different memory needs, so that turns a clear "pull this" at
+            startup into a confusing failure at generation time.
+            """
+            return _tagged(name) in installed
+
+        def _alternatives(name: str) -> list[str]:
+            """Other tags of the same model, which is the useful hint when the
+            configured one is missing."""
             base = name.split(":")[0]
-            return any(entry == name or entry.split(":")[0] == base for entry in available)
+            wanted = _tagged(name)
+            return sorted(
+                entry
+                for entry in installed
+                if entry.split(":")[0] == base and entry != wanted
+            )
 
         return {
             "reachable": response.status_code < 400,
@@ -215,8 +238,10 @@ class LocalLLM:
             "base_url": self.base_url,
             "chat_model": self.chat_model,
             "chat_model_available": _present(self.chat_model),
+            "chat_model_alternatives": _alternatives(self.chat_model),
             "embed_model": self.embed_model,
             "embed_model_available": _present(self.embed_model),
+            "embed_model_alternatives": _alternatives(self.embed_model),
             "available_models": available,
         }
 

@@ -4,9 +4,10 @@ local SearXNG JSON API (fallback).
 DuckDuckGo requires no signup/credentials, which is why it's the default and
 primary backend. The tradeoff is that it depends on DuckDuckGo's HTML markup,
 which is unofficial and can change without notice; if results stop parsing,
-`_parse_results` is the place to fix it. `search_web()` automatically falls
-back to a SearXNG instance (see docker-compose.yml) when DuckDuckGo fails, if
-one is configured via `FETCH_SEARXNG_URL`.
+`_parse_results` is the place to fix it. `online_search()` automatically
+falls back to a SearXNG instance (see docker-compose.yml) when DuckDuckGo
+fails, if one is configured via `FETCH_SEARXNG_URL`. `search_web()` dispatches
+between the live web and the local corpus; see its docstring.
 """
 
 from __future__ import annotations
@@ -24,6 +25,20 @@ from mcp_fetch_server.http_headers import request_headers
 logger = logging.getLogger(__name__)
 
 SEARCH_URL = "https://html.duckduckgo.com/html/"
+
+MAX_RESULTS = 20
+
+SEARCH_SOURCES = ("auto", "web", "corpus", "both")
+
+# Which results came from the curated archive and which from the live web
+# changes how they should be weighed. A corpus-only list is deliberately
+# unlabelled: in offline mode it is the only web there is, and announcing it
+# as a fallback only invites the model to distrust it.
+_BACKEND_LABELS = {
+    "corpus+web": "results from the local archive and the live web",
+    "web": "results from the live web",
+    "searxng": "results via fallback backend: searxng",
+}
 
 
 class SearchError(Exception):
@@ -83,8 +98,7 @@ async def web_search(query: str, max_results: int | None = None) -> list[SearchR
     if not query:
         raise SearchError("Search query must not be empty")
 
-    limit = max_results if max_results is not None else settings.search_max_results
-    limit = max(1, min(limit, 20))
+    limit = _result_limit(max_results)
 
     timeout = httpx.Timeout(settings.search_timeout_seconds)
     try:
@@ -139,8 +153,7 @@ async def searxng_search(query: str, max_results: int | None = None) -> list[Sea
     if not query:
         raise SearchError("Search query must not be empty")
 
-    limit = max_results if max_results is not None else settings.search_max_results
-    limit = max(1, min(limit, 20))
+    limit = _result_limit(max_results)
 
     timeout = httpx.Timeout(settings.searxng_timeout_seconds)
     try:
@@ -184,8 +197,7 @@ async def corpus_search(query: str, max_results: int | None = None) -> list[Sear
     except ImportError as exc:
         raise SearchError("The offline corpus extra is not installed") from exc
 
-    limit = max_results if max_results is not None else settings.search_max_results
-    limit = max(1, min(limit, 20))
+    limit = _result_limit(max_results)
 
     try:
         rows = await search_corpus(query, limit)
@@ -197,24 +209,28 @@ async def corpus_search(query: str, max_results: int | None = None) -> list[Sear
     return [SearchResult(title=title, url=url, snippet=snippet) for title, url, snippet in rows]
 
 
-async def search_web(
+def _result_limit(max_results: int | None) -> int:
+    """Clamp a requested result count to the supported range."""
+    limit = max_results if max_results is not None else settings.search_max_results
+    return max(1, min(limit, MAX_RESULTS))
+
+
+async def online_search(
     query: str, max_results: int | None = None
 ) -> tuple[list[SearchResult], str]:
-    """Search, preferring the local corpus, then DuckDuckGo, then SearXNG.
+    """Search the live web only: DuckDuckGo, falling back to SearXNG.
 
-    Returns ``(results, backend_name)``. Raises ``SearchError`` only if every
-    available backend fails.
+    Never consults the local corpus, so it stays reachable once a corpus
+    exists. Raises ``SearchError`` if every web backend fails.
     """
-    if settings.offline_enabled:
-        try:
-            return await corpus_search(query, max_results=max_results), "corpus"
-        except SearchError as corpus_exc:
-            if settings.net_mode == "offline":
-                raise SearchError(
-                    f"{corpus_exc} The server is in offline mode, so the web was not "
-                    "searched."
-                ) from corpus_exc
-            logger.info("Local corpus had no answer, falling back to the web: %s", corpus_exc)
+    # The air gap is asserted here, at the point where a request is actually
+    # made, as well as in the dispatcher. Enforcing it only by call position
+    # means a future caller that reaches for this function -- the name reads
+    # harmless -- would silently break an advertised guarantee.
+    if settings.net_mode == "offline":
+        raise SearchError(
+            "The server is in offline mode, so the live web cannot be searched."
+        )
 
     try:
         return await web_search(query, max_results=max_results), "duckduckgo"
@@ -231,6 +247,166 @@ async def search_web(
             ) from searxng_exc
 
 
+async def combined_search(
+    query: str, max_results: int | None = None
+) -> tuple[list[SearchResult], str]:
+    """Search the corpus and the live web, corpus results first.
+
+    For a question where local documents and current information both matter,
+    returning one and silently dropping the other is the wrong trade. Either
+    side failing is tolerated as long as the other answered.
+    """
+    limit = _result_limit(max_results)
+    corpus_results: list[SearchResult] = []
+    web_results: list[SearchResult] = []
+    web_backend = ""
+    failures: list[str] = []
+
+    try:
+        corpus_results = await corpus_search(query, max_results=max_results)
+    except SearchError as exc:
+        failures.append(f"corpus: {exc}")
+
+    try:
+        web_results, web_backend = await online_search(query, max_results=max_results)
+    except SearchError as exc:
+        failures.append(f"web: {exc}")
+
+    # A live-web result served from the archive's own host would appear beside
+    # genuinely local documents and inherit their credibility, while its title
+    # and snippet are attacker-influenceable. Search rankings can be gamed, so
+    # the archive's name is not left available to borrow.
+    archive_host = settings.site_host
+    if archive_host:
+        web_results = [
+            result
+            for result in web_results
+            if (urlparse(result.url).hostname or "").lower() != archive_host
+        ]
+
+    # Corpus URLs are unique to this archive, so a plain URL check is enough
+    # to keep an archived page from appearing twice.
+    seen = {result.url for result in corpus_results}
+    fresh_web = [result for result in web_results if result.url not in seen]
+
+    if not corpus_results and not fresh_web:
+        raise SearchError(f"No results from either source. {' | '.join(failures)}")
+
+    # Split the budget so asking for both actually returns both. Taking
+    # corpus-first up to the limit would starve the web side whenever the
+    # archive alone can fill the request, which defeats the point of asking.
+    corpus_share = (limit + 1) // 2 if fresh_web else limit
+    merged = [*corpus_results[:corpus_share], *fresh_web[: limit - corpus_share]]
+    # Top up from whichever side still has results, so a short answer on one
+    # side does not shrink the total.
+    for extra in (corpus_results[corpus_share:], fresh_web[limit - corpus_share :]):
+        for result in extra:
+            if len(merged) >= limit:
+                break
+            if result not in merged:
+                merged.append(result)
+
+    # The reported backend describes what survived into the result list, not
+    # what was fetched: labelling a list "corpus+web" after dedup removed
+    # every web entry defeats the label's whole purpose.
+    kept_web = [result for result in merged if result in fresh_web]
+    kept_corpus = [result for result in merged if result in corpus_results]
+    if not kept_web:
+        return merged, "corpus"
+    if not kept_corpus:
+        return merged, web_backend or "web"
+    return merged, "corpus+web"
+
+
+async def search_web(
+    query: str,
+    max_results: int | None = None,
+    *,
+    source: str = "auto",
+) -> tuple[list[SearchResult], str]:
+    """Search one or both sources, returning ``(results, backend_name)``.
+
+    ``source`` selects where to look:
+
+    * ``auto``   - corpus first when one is configured, web as a fallback
+    * ``web``    - the live internet only
+    * ``corpus`` - the local archive only
+    * ``both``   - both, corpus results first
+
+    ``auto`` exists because it was the original behaviour, and it has a sharp
+    edge worth naming: once the corpus holds anything relevant, it answers and
+    the web is never consulted. That is right for an air-gapped deployment and
+    wrong for a question about current events, which is why the other three
+    are selectable.
+
+    Offline mode refuses the web whatever is asked for. A deployment that
+    declares itself air-gapped should not be talked out of it by a tool
+    argument.
+    """
+    if source not in SEARCH_SOURCES:
+        raise SearchError(
+            f"Unknown search source: {source!r}. Use {', '.join(SEARCH_SOURCES)}."
+        )
+
+    is_offline = settings.net_mode == "offline"
+    # A separate name rather than reassigning the parameter, so the requested
+    # source and the one actually used stay distinguishable.
+    effective_source = source
+    degraded_from_offline = False
+
+    if is_offline and source in ("auto", "web", "both"):
+        if source == "web":
+            # The operator remedy goes to the log rather than the response:
+            # telling the untrusted caller how to switch off the air gap is
+            # not useful to it, and it is the operator's decision.
+            logger.info(
+                "Refused an explicit web search in offline mode. Set "
+                "FETCH_NET_MODE=hybrid to allow the live web."
+            )
+            raise SearchError(
+                "The server is in offline mode, so the live web cannot be "
+                "searched. Use source='corpus' to search the local archive."
+            )
+        # auto and both degrade to the corpus rather than failing outright.
+        effective_source = "corpus"
+        degraded_from_offline = True
+
+    if effective_source == "web":
+        return await online_search(query, max_results=max_results)
+
+    if effective_source == "corpus":
+        if not settings.offline_enabled:
+            raise SearchError(
+                "No local corpus is being served. Set FETCH_NET_MODE=hybrid or "
+                "offline to enable it."
+            )
+        try:
+            return await corpus_search(query, max_results=max_results), "corpus"
+        except SearchError as corpus_exc:
+            if degraded_from_offline:
+                # Without this the caller is told only that the archive had no
+                # match, and never why the web was not tried instead.
+                raise SearchError(
+                    f"{corpus_exc} The server is in offline mode, so the web "
+                    "was not searched."
+                ) from corpus_exc
+            raise
+
+    if effective_source == "both":
+        if not settings.offline_enabled:
+            return await online_search(query, max_results=max_results)
+        return await combined_search(query, max_results=max_results)
+
+    # auto, with a corpus available: prefer it, fall back to the web.
+    if settings.offline_enabled:
+        try:
+            return await corpus_search(query, max_results=max_results), "corpus"
+        except SearchError as corpus_exc:
+            logger.info("Local corpus had no answer, falling back to the web: %s", corpus_exc)
+
+    return await online_search(query, max_results=max_results)
+
+
 def format_results(results: list[SearchResult], *, backend: str | None = None) -> str:
     if not results:
         return "[No results]"
@@ -239,8 +415,11 @@ def format_results(results: list[SearchResult], *, backend: str | None = None) -
         block = f"{index}. {result.title}\n   URL: {result.url}\n   {result.snippet}"
         blocks.append(block.rstrip())
     body = "\n\n".join(blocks)
-    # The corpus is not a "fallback" to announce: in offline mode it is the
-    # only web there is, and saying so just invites the model to distrust it.
-    if backend and backend not in ("duckduckgo", "corpus"):
-        body = f"(results via fallback backend: {backend})\n\n{body}"
+    # The corpus alone is not a "fallback" to announce: in offline mode it is
+    # the only web there is, and saying so just invites the model to distrust
+    # it. A mixed result set is different -- which results are local archive
+    # and which are live web changes how they should be weighed.
+    label = _BACKEND_LABELS.get(backend or "")
+    if label:
+        body = f"({label})\n\n{body}"
     return body

@@ -374,3 +374,37 @@ async def test_unload_swallows_errors():
         await llm.unload("gemma3:4b")  # must not raise
     finally:
         await llm.aclose()
+
+
+@respx.mock
+async def test_health_requires_an_exact_tag_match():
+    """Regression: matching on the base name reported gemma3:4b as installed
+    when only gemma3:12b was present. Different models, very different memory
+    needs, and the failure moved from startup to generation time."""
+    respx.get(f"{OLLAMA}/api/tags").mock(
+        return_value=httpx.Response(200, json={"models": [{"model": "gemma3:12b"}]})
+    )
+    llm = ollama_llm()
+    try:
+        health = await llm.health()
+    finally:
+        await llm.aclose()
+
+    assert health["chat_model_available"] is False
+    assert health["chat_model_alternatives"] == ["gemma3:12b"]
+
+
+@respx.mock
+async def test_health_treats_a_bare_name_as_the_latest_tag():
+    """Ollama reports bge-m3 as bge-m3:latest; they are the same model."""
+    respx.get(f"{OLLAMA}/api/tags").mock(
+        return_value=httpx.Response(200, json={"models": [{"model": "bge-m3:latest"}]})
+    )
+    llm = ollama_llm()
+    try:
+        health = await llm.health()
+    finally:
+        await llm.aclose()
+
+    assert health["embed_model_available"] is True
+    assert health["embed_model_alternatives"] == []

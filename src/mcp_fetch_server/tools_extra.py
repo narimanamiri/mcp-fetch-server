@@ -13,6 +13,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -152,9 +153,13 @@ async def run_batch_fetch(
 # --------------------------------------------------------------------------
 
 
-async def run_web_search(query: str, *, max_results: int | None = None) -> str:
+async def run_web_search(
+    query: str, *, max_results: int | None = None, source: str = "auto"
+) -> str:
     try:
-        results, backend = await search_module.search_web(query, max_results=max_results)
+        results, backend = await search_module.search_web(
+            query, max_results=max_results, source=source
+        )
     except search_module.SearchError as exc:
         raise ToolError(str(exc)) from exc
     return search_module.format_results(results, backend=backend)
@@ -265,13 +270,25 @@ def register_extra_tools(mcp: FastMCP) -> None:
     @mcp.tool(
         annotations=read_only,
         description=(
-            "Search the web via DuckDuckGo (no API key required) and return titles, "
-            "URLs, and snippets for the top matches. Automatically falls back to a "
-            "local SearXNG instance (FETCH_SEARXNG_URL) if DuckDuckGo's scrape fails."
+            "Search for information and return titles, URLs and snippets. The source "
+            "argument chooses where to look: 'web' for the live internet (DuckDuckGo, "
+            "falling back to a local SearXNG), 'corpus' for the local document "
+            "archive, 'both' to search each and get the archive results first, or "
+            "'auto' to use the archive when it has an answer and the web otherwise. "
+            "Pass source='web' when currency matters, since 'auto' prefers the "
+            "archive. No API key is required."
         ),
     )
-    async def web_search(query: str, max_results: int = settings.search_max_results) -> str:
-        return await run_web_search(query, max_results=max_results)
+    async def web_search(
+        query: str,
+        max_results: int = settings.search_max_results,
+        # A Literal publishes an enum in the tool schema, so a client can see
+        # the valid values and correct itself rather than discovering a bad
+        # one as a runtime error. The check in search_web stays as
+        # defence-in-depth for direct Python callers.
+        source: Literal["auto", "web", "corpus", "both"] = "auto",
+    ) -> str:
+        return await run_web_search(query, max_results=max_results, source=source)
 
     @mcp.tool(
         annotations=read_only,

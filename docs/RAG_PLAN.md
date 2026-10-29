@@ -325,6 +325,31 @@ is logged, and is retried on the next one, since a document is only marked
 embedded once it succeeds. Observed in practice: two failed scans while Docker
 started, then indexed on the third with no intervention.
 
+## Choosing between the archive and the live web
+
+`web_search` takes a `source` argument:
+
+| `source` | Where it looks |
+|---|---|
+| `auto` | The archive when it has an answer, the live web otherwise (the original behaviour) |
+| `web` | The live internet only, even when an archive exists |
+| `corpus` | The local archive only |
+| `both` | Both, archive results first, labelled as mixed |
+
+`auto` has a sharp edge worth naming, and it is why the others exist: once the
+archive holds anything relevant it answers, and the web is never consulted.
+That is correct for an air-gapped deployment and wrong for a question about
+current events. Pass `source="web"` when currency matters.
+
+`both` tolerates either side failing as long as the other answered, and
+deduplicates on URL so an archived page does not appear twice.
+
+**Offline mode overrides the argument.** With `FETCH_NET_MODE=offline`,
+`source="web"` is refused and `auto`/`both` degrade to the archive. A
+deployment that declares itself air-gapped should not be talked out of it by a
+tool argument; a parametrised test asserts that no source value issues a
+single web request in that mode.
+
 ## The corpus as an MCP surface
 
 The corpus is reachable without a shell. Tools:

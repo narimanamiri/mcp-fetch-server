@@ -16,7 +16,7 @@ An all-in-one Python MCP server for web research: fetch pages, search the web, b
 - `fetch_url` — page content as markdown, with chunked reading (`start_index`, `max_length`)
 - `fetch_metadata_tool` — HEAD request metadata
 - `batch_fetch` — fetch multiple URLs concurrently, with per-URL error isolation and progress
-- `web_search` — DuckDuckGo web search (no API key), with automatic fallback to a local SearXNG instance if DuckDuckGo's scrape fails
+- `web_search` — search the live web (DuckDuckGo, no API key, with SearXNG fallback), the local corpus, or both, via `source=auto|web|corpus|both`
 - `extract_links` — structured link/image extraction from a page
 - `summarize_url` — asks the connected client's LLM to summarize a page (MCP sampling)
 - `read_file` / `write_file` / `list_dir` — sandboxed local file access (opt-in, disabled by default)

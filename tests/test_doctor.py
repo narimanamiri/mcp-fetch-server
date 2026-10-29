@@ -250,3 +250,56 @@ async def test_check_qdrant_suggests_embedded_mode_when_down(monkeypatch):
     report = doctor.Report()
     await doctor.check_qdrant(report)
     assert "FETCH_QDRANT_URL empty" in report.render()
+
+
+@respx.mock
+async def test_doctor_names_another_tag_it_found():
+    """The difference between "pull 3 GB" and "change one setting"."""
+    respx.get(f"{OLLAMA}/api/tags").mock(
+        return_value=httpx.Response(
+            200, json={"models": [{"model": "gemma3:12b"}, {"model": "bge-m3:latest"}]}
+        )
+    )
+    respx.post(f"{OLLAMA}/api/embed").mock(
+        return_value=httpx.Response(200, json={"embeddings": [[0.0] * 8]})
+    )
+    report = doctor.Report()
+    llm = _llm()
+    try:
+        await doctor.check_llm(report, llm=llm)
+    finally:
+        await llm.aclose()
+
+    assert _status(report, "chat model") == "fail"
+    assert _status(report, "embedding model") == "ok"
+    rendered = report.render()
+    assert "found gemma3:12b" in rendered
+    assert "point the config at one you have" in rendered
+
+
+def test_offline_mode_warns_about_a_remote_model_backend(monkeypatch):
+    """Offline covers fetch and search, not the embedding call. A remote model
+    sends every query to a third party while the server reports itself
+    air-gapped."""
+    monkeypatch.setattr(settings, "net_mode", "offline")
+    monkeypatch.setattr(settings, "llm_backend", "openai")
+    monkeypatch.setattr(settings, "llm_base_url", "https://api.example.com/v1")
+
+    report = doctor.Report()
+    doctor.check_mode(report)
+
+    assert _status(report, "corpus mode") == "warn"
+    rendered = report.render()
+    assert "does not cover the embedding model" in rendered
+    assert report.failed is False
+
+
+def test_offline_mode_is_satisfied_by_a_local_openai_backend(monkeypatch):
+    """A local OpenAI-compatible server (llama.cpp, vLLM) keeps the air gap."""
+    monkeypatch.setattr(settings, "net_mode", "offline")
+    monkeypatch.setattr(settings, "llm_backend", "openai")
+    monkeypatch.setattr(settings, "llm_base_url", "http://localhost:8000/v1")
+
+    report = doctor.Report()
+    doctor.check_mode(report)
+    assert _status(report, "corpus mode") == "ok"
